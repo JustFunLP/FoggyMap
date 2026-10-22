@@ -14,44 +14,71 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
       FOGGY_VERSION_CODE: ${{ github.run_number }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
+      - name: Android SDK (pre-installed on the runner, installed if missing)
+        run: |
+          set -e
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          if [ ! -x "$SDK/cmdline-tools/latest/bin/sdkmanager" ]; then
+            SDK="$HOME/android-sdk"; mkdir -p "$SDK/cmdline-tools"
+            curl -sSL -o /tmp/clt.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            unzip -q /tmp/clt.zip -d "$SDK/cmdline-tools" && mv "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
+          fi
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"; echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$SDK/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "platform-tools" > /dev/null
+          ls "$SDK/platforms"
 
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.11.1'
 
-      - name: Restore signing key
+      - name: Stable signing key (secret, or private draft release)
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KEYSTORE_B64: ${{ secrets.FOGGY_KEYSTORE_B64 }}
+          KEYSTORE_PW: ${{ secrets.FOGGY_KEYSTORE_PASSWORD }}
         run: |
+          set -e
+          K="$RUNNER_TEMP/foggy.jks"
           if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/foggy.jks"
-            echo "FOGGY_KEYSTORE_FILE=$RUNNER_TEMP/foggy.jks" >> "$GITHUB_ENV"
-            echo "Stable release key found."
+            echo "$KEYSTORE_B64" | base64 -d > "$K"; PW="$KEYSTORE_PW"
           else
-            echo "::warning::No FOGGY_KEYSTORE_B64 secret – release APK is signed with a temporary debug key."
+            # A draft release is only visible to people with write access to this repository,
+            # even if the repository is ever made public. The key never enters the git history.
+            mkdir -p "$RUNNER_TEMP/key"
+            if gh release download signing-key -D "$RUNNER_TEMP/key" -p 'foggy.*' 2>/dev/null; then
+              cp "$RUNNER_TEMP/key/foggy.jks" "$K"; PW=$(cat "$RUNNER_TEMP/key/foggy.pass")
+              echo "Using stored signing key."
+            else
+              PW=$(openssl rand -base64 30 | tr -d '/+=\n')
+              keytool -genkeypair -keystore "$K" -storetype PKCS12 -alias foggymap -keyalg RSA -keysize 4096 \
+                -validity 10000 -storepass "$PW" -keypass "$PW" -dname "CN=FoggyMap, O=FoggyMap"
+              cp "$K" "$RUNNER_TEMP/key/foggy.jks"; echo -n "$PW" > "$RUNNER_TEMP/key/foggy.pass"
+              gh release create signing-key --draft --title "Signierschlüssel (privat, nicht löschen)" \
+                --notes "Entwurf, nur für Repo-Mitglieder sichtbar. Wird für stabile App-Updates gebraucht." \
+                "$RUNNER_TEMP/key/foggy.jks" "$RUNNER_TEMP/key/foggy.pass"
+              echo "Created new signing key."
+            fi
           fi
+          echo "::add-mask::$PW"
+          { echo "FOGGY_KEYSTORE_FILE=$K"; echo "FOGGY_KEYSTORE_PASSWORD=$PW"; echo "FOGGY_KEY_PASSWORD=$PW"; echo "FOGGY_KEY_ALIAS=foggymap"; } >> "$GITHUB_ENV"
 
       - name: Unit tests
         run: gradle --no-daemon --stacktrace :app:testDebugUnitTest
 
       - name: Build APKs
-        env:
-          FOGGY_KEYSTORE_PASSWORD: ${{ secrets.FOGGY_KEYSTORE_PASSWORD }}
-          FOGGY_KEY_ALIAS: ${{ secrets.FOGGY_KEY_ALIAS }}
-          FOGGY_KEY_PASSWORD: ${{ secrets.FOGGY_KEY_PASSWORD }}
         run: |
           gradle --no-daemon --stacktrace :app:assembleRelease :app:assembleDebug
           mkdir -p out

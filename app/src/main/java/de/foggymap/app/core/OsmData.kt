@@ -1,0 +1,64 @@
+package de.foggymap.app.core
+
+import org.json.JSONObject
+
+/** One OSM way with resolved geometry, as delivered by Overpass `out geom`. */
+class OsmWay(
+    val id: Long,
+    val nodes: LongArray,
+    val points: List<LatLon>,
+    val tags: Map<String, String>,
+) {
+    operator fun get(key: String) = tags[key]
+}
+
+class OsmData(val ways: List<OsmWay>, val bbox: BBox)
+
+object OverpassQuery {
+    /**
+     * Streets, footpaths, block boundaries (railways, rivers) and building footprints for one bbox.
+     * `out geom` returns the complete way geometry and node ids even outside the bbox.
+     */
+    fun forBox(b: BBox): String {
+        val box = "${b.south},${b.west},${b.north},${b.east}"
+        return """
+            [out:json][timeout:40][maxsize:134217728];
+            (
+              way["highway"]["highway"!~"^(proposed|construction|abandoned|platform|raceway|elevator|bus_stop|rest_area|services|razed)$"]($box);
+              way["building"]($box);
+              way["railway"~"^(rail|light_rail|subway|narrow_gauge)$"]($box);
+              way["waterway"~"^(river|canal)$"]($box);
+            );
+            out body geom qt;
+        """.trimIndent()
+    }
+}
+
+object OsmParser {
+    fun parse(json: String, bbox: BBox): OsmData {
+        val root = JSONObject(json)
+        val elements = root.optJSONArray("elements") ?: return OsmData(emptyList(), bbox)
+        val ways = ArrayList<OsmWay>(elements.length())
+        for (i in 0 until elements.length()) {
+            val e = elements.optJSONObject(i) ?: continue
+            if (e.optString("type") != "way") continue
+            val geo = e.optJSONArray("geometry") ?: continue
+            val nodesArr = e.optJSONArray("nodes") ?: continue
+            if (geo.length() != nodesArr.length() || geo.length() < 2) continue
+            val tagsObj = e.optJSONObject("tags") ?: continue
+            val tags = HashMap<String, String>()
+            for (k in tagsObj.keys()) tags[k] = tagsObj.optString(k)
+            val pts = ArrayList<LatLon>(geo.length())
+            var ok = true
+            for (j in 0 until geo.length()) {
+                val g = geo.optJSONObject(j)
+                if (g == null || !g.has("lat")) { ok = false; break }   // null for nodes outside a clipped query
+                pts.add(LatLon(g.getDouble("lat"), g.getDouble("lon")))
+            }
+            if (!ok) continue
+            val nodes = LongArray(nodesArr.length()) { nodesArr.getLong(it) }
+            ways.add(OsmWay(e.getLong("id"), nodes, pts, tags))
+        }
+        return OsmData(ways, bbox)
+    }
+}
