@@ -261,8 +261,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
                 .gpsDrawable(R.drawable.ic_puck_arrow)
                 .accuracyColor(Color.parseColor(VIOLET))
                 .accuracyAlpha(0.12f)
-                .pulseEnabled(true)
-                .pulseColor(Color.parseColor(VIOLET))
+                // No pulsing: a pulse animates the map at 60 fps all the time and costs battery.
                 .build()
             lc.activateLocationComponent(LocationComponentActivationOptions.builder(context, style)
                 .locationComponentOptions(opts).useDefaultLocationEngine(false).build())
@@ -271,7 +270,14 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
                 override fun onCameraTrackingChanged(currentMode: Int) {}
             })
         }
-        return try { lc.isLocationComponentEnabled = true; lc.renderMode = RenderMode.GPS; true } catch (_: Exception) { false }
+        return try {
+            lc.isLocationComponentEnabled = true
+            lc.renderMode = RenderMode.GPS
+            true
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "location component could not be enabled", e)
+            false
+        }
     }
 
     fun updateLocation(loc: Location) {
@@ -283,7 +289,11 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
 
     fun setFollow(mode: Follow, perspective: Boolean) {
         val lc = map.locationComponent
-        if (!lc.isLocationComponentActivated || !lc.isLocationComponentEnabled) return
+        if (!lc.isLocationComponentActivated || !lc.isLocationComponentEnabled) {
+            android.util.Log.w(TAG, "setFollow($mode) ignored – location component not enabled")
+            return
+        }
+        android.util.Log.i(TAG, "camera follow mode $mode, perspective $perspective")
         when (mode) {
             Follow.FOLLOW -> lc.cameraMode = CameraMode.TRACKING_GPS
             Follow.NORTH -> lc.cameraMode = CameraMode.TRACKING_GPS_NORTH
@@ -307,6 +317,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
     }
 
     companion object {
+        const val TAG = "FoggyMap"
         const val FOG = "#080A17"
         const val VIOLET = "#8B5CF6"
         const val LAVENDER = "#C4B5FD"

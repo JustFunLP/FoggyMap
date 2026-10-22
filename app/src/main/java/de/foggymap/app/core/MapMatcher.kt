@@ -101,15 +101,19 @@ class MapMatcher(private val cfg: Config = Config()) {
         val to = LatLon(tail.sumOf { it.lat } / k, tail.sumOf { it.lon } / k)
         val net = Geo.distance(from, to)
         val netSpeed = if (span >= 8.0) net / span else 0.0
-        val speedNow = fix.speed ?: netSpeed
+        // Doppler speed from the GPS chip is preferred, but some providers (and emulators) report 0 while
+        // moving – so a clear net displacement always wins.
+        val doppler = fix.speed ?: 0.0
+        val speedNow = max(doppler, netSpeed)
         smoothedSpeed = if (prev == null) speedNow else smoothedSpeed * 0.5 + speedNow * 0.5
-        val movingNow = smoothedSpeed > 0.8 && (fix.speed != null || net >= max(15.0, fix.accuracy * 1.5))
+        val displaced = net >= max(15.0, fix.accuracy * 1.5)
+        val movingNow = smoothedSpeed > 0.8 && (doppler >= 1.0 || displaced)
         movingStreak = if (movingNow) movingStreak + 1 else 0
         // Without Doppler speed, require the displacement on two consecutive fixes (jitter rarely does that).
-        val moving = movingNow && (fix.speed != null || movingStreak >= 2)
+        val moving = movingNow && (doppler >= 1.0 || movingStreak >= 2)
 
         val heading: Double? = when {
-            fix.bearing != null && (fix.speed ?: 0.0) >= 1.2 -> fix.bearing
+            fix.bearing != null && doppler >= 1.2 -> fix.bearing
             moving && prev != null && dist >= max(8.0, fix.accuracy * 0.8) -> Geo.bearing(prev.pos, fix.pos)
             moving -> Geo.bearing(from, to)
             else -> null

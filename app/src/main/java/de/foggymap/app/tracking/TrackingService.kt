@@ -129,7 +129,7 @@ class TrackingService : Service() {
     private fun start() {
         startedAt = SystemClock.elapsedRealtime()
         App.prefs.trackingWanted = true
-        App.tracking.update { TrackingUi(active = true, message = "Suche GPS-Signal …") }
+        App.tracking.update { TrackingUi(active = true, message = SEARCHING) }
         scope.launch {
             val known = withContext(Dispatchers.IO) { App.db.roadIds() }
             explorer = Explorer(known)
@@ -161,7 +161,10 @@ class TrackingService : Service() {
             updateProfile(fix, loc)
         }
         drain(ex)
-        App.tracking.update { it.copy(accuracy = lastLocation?.accuracy, queuedFixes = queue.size) }
+        App.tracking.update {
+            it.copy(accuracy = lastLocation?.accuracy, queuedFixes = queue.size,
+                message = if (it.message == SEARCHING) null else it.message)
+        }
         maybeNotify()
         maybePushLive()
     }
@@ -192,6 +195,7 @@ class TrackingService : Service() {
             if (step.items.isNotEmpty()) {
                 val added = withContext(Dispatchers.IO) { App.db.insert(step.items, RevealDatabase.OWNER_ME, synced = false) }
                 if (added.isNotEmpty()) {
+                    android.util.Log.i("FoggyMap", "revealed ${step.segments.joinToString { it.name ?: it.id }}: ${added.size} new items")
                     sessionSegments += step.segments.size
                     App.notifyDbChanged()
                     App.sync.requestSync()
@@ -216,12 +220,15 @@ class TrackingService : Service() {
                 loading -= cell
                 when (result) {
                     is OsmRepository.Result.Ok -> {
+                        android.util.Log.i("FoggyMap", "cell loaded ${cell.name}: ${result.model.segments.size} segments, " +
+                            "${result.model.faces.size} blocks, ${result.model.buildings.size} buildings (cache=${result.fromCache})")
                         failures.remove(cell)
                         explorer?.addCell(cell, result.model)
                         App.scope.launch { App.refreshCoverage() }
                         explorer?.let { drain(it) }
                     }
                     is OsmRepository.Result.Failed -> {
+                        android.util.Log.w("FoggyMap", "cell ${cell.name} failed: ${result.message}")
                         val wait = (30_000L shl attempts.coerceAtMost(5)).coerceAtMost(10 * 60_000L)
                         failures[cell] = (attempts + 1) to SystemClock.elapsedRealtime() + wait
                         App.tracking.update {
@@ -412,6 +419,7 @@ class TrackingService : Service() {
 
     companion object {
         const val CHANNEL = "exploration"
+        const val SEARCHING = "Suche GPS-Signal …"
         const val NOTIFICATION_ID = 17
         const val ACTION_STOP = "de.foggymap.app.STOP"
         const val ACTION_SETTINGS_CHANGED = "de.foggymap.app.SETTINGS"

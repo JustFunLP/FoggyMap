@@ -6,10 +6,17 @@ set -u
 PKG=de.foggymap.app.debug
 OUT=e2e-out
 mkdir -p "$OUT"
-shot() { adb exec-out screencap -p > "$OUT/$1.png"; echo "screenshot $1"; }
+shot() {
+  adb shell am broadcast -a android.intent.action.CLOSE_SYSTEM_DIALOGS > /dev/null 2>&1 || true
+  sleep 1
+  adb exec-out screencap -p > "$OUT/$1.png"; echo "screenshot $1"
+}
 
 adb wait-for-device
 adb shell settings put secure location_mode 3 || true
+# A software-rendered CI emulator is slow; never show "isn't responding" dialogs over the app.
+adb shell settings put global hide_error_dialogs 1 || true
+adb shell settings put global anr_show_background 0 || true
 adb install -r -g out/FoggyMap-debug.apk
 adb shell pm grant $PKG android.permission.ACCESS_FINE_LOCATION || true
 adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS || true
@@ -19,7 +26,13 @@ read -r LON LAT < scripts/e2e_route.txt
 for i in 1 2 3; do adb emu geo fix "$LON" "$LAT"; sleep 1; done
 
 adb shell am start -n $PKG/de.foggymap.app.MainActivity --ez e2e_autostart true
-sleep 25
+# Wait until the street data of the start cell is loaded (Overpass can take a while).
+for i in $(seq 1 90); do
+  adb emu geo fix "$LON" "$LAT" > /dev/null
+  if adb logcat -d -s FoggyMap:I | grep -q "cell loaded"; then echo "map data loaded after ${i}x2 s"; break; fi
+  sleep 2
+done
+sleep 5
 shot 01-start
 
 # Drive the route: one GPS fix per second (≈ 6 m/s).
@@ -39,13 +52,13 @@ shot 03-ziel
 SIZE=$(adb shell wm size | grep -oE '[0-9]+x[0-9]+' | tail -1); W=${SIZE%x*}; H=${SIZE#*x}
 adb shell input tap $((W/2)) $((H*76/100)); sleep 3; shot 04-statistik
 adb shell input keyevent KEYCODE_BACK; sleep 2
-adb shell input tap $((W*72/100)) $((H*5/100)); sleep 3; shot 05-koop
+adb shell input tap $((W*73/100)) $((H*85/1000)); sleep 3; shot 05-koop
 adb shell input keyevent KEYCODE_BACK; sleep 1
 
 adb exec-out run-as $PKG cat databases/foggymap.db > "$OUT/foggymap.db" 2>/dev/null || true
 adb exec-out run-as $PKG cat databases/foggymap.db-wal > "$OUT/foggymap.db-wal" 2>/dev/null || true
 adb logcat -d > "$OUT/logcat-full.txt"
-grep -E "FoggyMatcher|AndroidRuntime|FATAL|maplibre|MapLibre|foggymap" "$OUT/logcat-full.txt" > "$OUT/logcat-app.txt" || true
+grep -E "FoggyMap|FoggyMatcher|AndroidRuntime|FATAL|maplibre|MapLibre|foggymap" "$OUT/logcat-full.txt" > "$OUT/logcat-app.txt" || true
 
 python3 - "$OUT" <<'PY'
 import sqlite3, sys, os, shutil
@@ -66,6 +79,6 @@ else:
     summary.append("Datenbank konnte nicht gelesen werden")
 open(os.path.join(out, "summary.txt"), "w").write("\n".join(summary) + "\n")
 print("\n".join(summary))
-ok = (not crash) and counts.get('r', 0) >= 5
+ok = (not crash) and counts.get('r', 0) >= 12
 sys.exit(0 if ok else 1)
 PY
