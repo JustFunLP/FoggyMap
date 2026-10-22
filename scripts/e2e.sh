@@ -52,15 +52,19 @@ done
 sleep 5
 shot 01-start
 
-# Drive the route like a real trip: first third with the app open (map follows), second third with the
-# app in the background, last third with the screen off (phone in the pocket).
+# Drive the route like a real trip: the app goes to the background right away, and for the second half
+# the screen is off (phone in the pocket). Only the foreground service runs. A software-rendered CI
+# emulator without GPU freezes completely while the 3D map is on screen, so the map is only opened again
+# at the end for the screenshots.
+shot 02-unterwegs
+adb shell input keyevent KEYCODE_HOME
+sleep 3
 TOTAL=$(wc -l < scripts/e2e_route.txt)
 n=0
 while read -r LON LAT <&3; do
   adb emu geo fix "$LON" "$LAT" > /dev/null < /dev/null
   n=$((n+1))
-  if [ $n -eq $((TOTAL/3)) ]; then shot 02-unterwegs < /dev/null; adb shell input keyevent KEYCODE_HOME < /dev/null; echo "background after $n points"; fi
-  if [ $n -eq $((TOTAL*2/3)) ]; then adb shell input keyevent KEYCODE_SLEEP < /dev/null; echo "screen off after $n points"; fi
+  if [ $n -eq $((TOTAL/2)) ]; then adb shell input keyevent KEYCODE_SLEEP < /dev/null; echo "screen off after $n points"; fi
   sleep 1
 done 3< scripts/e2e_route.txt
 echo "drove $n route points"
