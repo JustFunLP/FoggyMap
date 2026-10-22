@@ -37,7 +37,7 @@ class OsmRepository(context: Context) {
         "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     )
     private val memory = object : LinkedHashMap<CellKey, WorldModel>(8, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CellKey, WorldModel>?) = size > 6
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CellKey, WorldModel>?) = size > 4
     }
     private val lock = Mutex()
     private var preferredEndpoint = 0

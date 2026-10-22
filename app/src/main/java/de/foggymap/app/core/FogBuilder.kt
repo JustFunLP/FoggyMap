@@ -19,10 +19,16 @@ import org.locationtech.jts.simplify.TopologyPreservingSimplifier
  * Geometry is handled in a linear lon/lat-scaled metric frame around a fixed anchor latitude, so
  * the world rectangle maps exactly and buffer distances are metres around that latitude.
  */
-class FogBuilder(anchorLat: Double) {
+class FogBuilder(anchorLat: Double, private val levels: DoubleArray = doubleArrayOf(0.0, 9.0, 24.0)) {
     private val proj = LocalProjection(LatLon(anchorLat, 0.0))
     private val gf = GeometryFactory()
-    private var revealed: Geometry = gf.createPolygon()
+    /**
+     * One cumulative union per feather level. buffer(A ∪ B) = buffer(A) ∪ buffer(B), so each level is
+     * maintained incrementally by buffering only the *new* items – adding a reveal stays cheap even
+     * after thousands of explored streets.
+     */
+    private val unions = Array<Geometry>(levels.size) { gf.createPolygon() }
+    private val revealed: Geometry get() = unions[0]
     private val roads = LinkedHashMap<String, RevealItem>()
     private val buildings = LinkedHashMap<String, RevealItem>()
     private val known = HashSet<String>()
@@ -43,25 +49,33 @@ class FogBuilder(anchorLat: Double) {
             }
         }
         if (geoms.isEmpty()) return true
-        val batch = try { UnaryUnionOp.union(geoms) } catch (_: Exception) { UnaryUnionOp.union(geoms.map { g -> g.buffer(0.0) }) }
-        revealed = try {
-            if (revealed.isEmpty) batch else revealed.union(batch)
-        } catch (_: Exception) {
-            revealed.buffer(0.0).union(batch.buffer(0.0))
+        val batch = safeUnion(geoms)
+        for ((i, d) in levels.withIndex()) {
+            val grown = if (d == 0.0) batch else batch.buffer(d, 4)
+            val merged = try {
+                if (unions[i].isEmpty) grown else unions[i].union(grown)
+            } catch (_: Exception) {
+                unions[i].buffer(0.0).union(grown.buffer(0.0))
+            }
+            unions[i] = TopologyPreservingSimplifier.simplify(merged, if (d == 0.0) 0.3 else 0.8)
         }
-        revealed = TopologyPreservingSimplifier.simplify(revealed, 0.3)
         return true
     }
 
+    private fun safeUnion(geoms: List<Geometry>): Geometry =
+        try { UnaryUnionOp.union(geoms) } catch (_: Exception) { UnaryUnionOp.union(geoms.map { g -> g.buffer(0.0) }) }
+
     fun clear() {
-        revealed = gf.createPolygon(); roads.clear(); buildings.clear(); known.clear()
+        for (i in unions.indices) unions[i] = gf.createPolygon()
+        roads.clear(); buildings.clear(); known.clear()
     }
 
-    /** Fog = world minus revealed area grown by [growMeters] (0 = exact edge). */
+    /** Fog = world minus revealed area grown by [growMeters] (must be one of the configured levels). */
     fun fogGeoJson(growMeters: Double): String {
         val world = worldRect()
-        if (revealed.isEmpty) return featureCollection(listOf(feature(polygonJson(world))))
-        val hole = if (growMeters == 0.0) revealed else revealed.buffer(growMeters, 4)
+        val idx = levels.indexOfFirst { it == growMeters }
+        val hole = if (idx >= 0) unions[idx] else if (revealed.isEmpty) revealed else revealed.buffer(growMeters, 4)
+        if (hole.isEmpty) return featureCollection(listOf(feature(polygonJson(world))))
         val fog = try { world.difference(hole) } catch (_: Exception) { world.difference(hole.buffer(0.0)) }
         return featureCollection(listOf(feature(geometryJson(fog))))
     }

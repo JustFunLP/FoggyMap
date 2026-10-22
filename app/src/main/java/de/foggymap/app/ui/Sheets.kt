@@ -384,7 +384,7 @@ fun SettingsSheet(onChanged: () -> Unit, onDataCleared: () -> Unit, onDismiss: (
         Spacer(Modifier.height(8.dp))
         Text(BatteryMode.entries[battery].description, color = Fog.Muted, fontSize = 12.sp)
         Spacer(Modifier.height(10.dp))
-        InfoBox("So spart FoggyMap Akku: GPS schaltet sich im Stillstand ab und wird vom Bewegungssensor wieder geweckt. " +
+        InfoBox("So spart FoggyMap Akku: Nach 2–3 Minuten Stillstand schaltet sich das GPS ab. Der Bewegungssensor und kurze GPS-Stichproben wecken es wieder. " +
             "Bei ausgeschaltetem Bildschirm sammelt der GPS-Chip die Positionen und liefert sie gebündelt. Ohne GPS-Empfang (drinnen) " +
             "wird nach 3 Minuten pausiert. Kartendaten werden nur einmal pro Gebiet geladen und offline gespeichert.",
             painterResource(R.drawable.ic_battery), Fog.Success)

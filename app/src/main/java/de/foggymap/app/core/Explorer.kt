@@ -57,7 +57,7 @@ class Explorer(knownRoadIds: Collection<String>) {
     fun addCell(k: CellKey, model: WorldModel) {
         models[k] = model
         // Keep memory bounded: a car trip can cross many cells.
-        while (models.size > 12) models.remove(models.keys.first())
+        while (models.size > 6) models.remove(models.keys.first())
     }
 
     /** Ids of segments synced from friends: they count as known so we do not reveal them again. */

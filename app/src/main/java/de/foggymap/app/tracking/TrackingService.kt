@@ -424,7 +424,7 @@ class TrackingService : Service() {
         const val ACTION_STOP = "de.foggymap.app.STOP"
         const val ACTION_SETTINGS_CHANGED = "de.foggymap.app.SETTINGS"
         const val MAX_QUEUE = 20_000
-        const val STILL_AFTER_MS = 75_000L
+        const val STILL_AFTER_MS = 150_000L
         const val NO_SIGNAL_MS = 180_000L
 
         fun createChannel(context: Context) {

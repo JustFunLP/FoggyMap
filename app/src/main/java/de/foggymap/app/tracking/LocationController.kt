@@ -21,9 +21,11 @@ import de.foggymap.app.data.BatteryMode
  * Battery-aware location subscription.
  *
  * Where the energy goes and what we do about it:
- *  - GPS while standing still is the biggest waste → after ~75 s without movement GPS is switched
- *    off and only a low-power (Wi-Fi/cell) fix every 30–60 s is requested. The hardware
- *    "significant motion" sensor (practically free) wakes GPS again as soon as you walk on.
+ *  - GPS while standing still is the biggest waste → after ~2.5 min without movement GPS is switched
+ *    off. Then only (a) a low-power Wi-Fi/cell fix, (b) positions other apps request anyway
+ *    (passive, free) and (c) a short single GPS fix every 45–90 s are used. The hardware
+ *    "significant motion" sensor (practically free) wakes GPS immediately when you walk on;
+ *    the GPS samples catch cases the sensor misses (car, bike, phones without that sensor).
  *  - No GPS signal for minutes (indoors, underground) → also drop to low power instead of letting
  *    the receiver search forever.
  *  - Update rate follows the speed: on foot every 3 s / 4 m, by car every 2 s / 10 m.
@@ -48,6 +50,36 @@ class LocationController(private val context: Context, private val onLocations: 
         override fun onLocationChanged(locations: MutableList<Location>) = onLocations(locations.toList())
         override fun onProviderEnabled(provider: String) {}
         override fun onProviderDisabled(provider: String) {}
+    }
+
+    private val passive = object : LocationListenerCompat {
+        override fun onLocationChanged(location: Location) = onLocations(listOf(location))
+        override fun onProviderEnabled(provider: String) {}
+        override fun onProviderDisabled(provider: String) {}
+    }
+    private var passiveOn = false
+    private var probeSignal: android.os.CancellationSignal? = null
+    private val probe = object : Runnable {
+        @SuppressLint("MissingPermission")
+        override fun run() {
+            if (profile != Profile.STILL) return
+            probeSignal?.cancel()
+            val signal = android.os.CancellationSignal().also { probeSignal = it }
+            try {
+                LocationManagerCompat.getCurrentLocation(lm, LocationManager.GPS_PROVIDER, signal,
+                    ContextCompat.getMainExecutor(context), androidx.core.util.Consumer<Location> { loc ->
+                        if (loc != null && profile == Profile.STILL) onLocations(listOf(loc))
+                    })
+                main.postDelayed({ signal.cancel() }, 25_000)
+            } catch (_: Exception) { }
+            main.postDelayed(this, probeInterval())
+        }
+    }
+
+    private fun probeInterval(): Long = when (mode) {
+        BatteryMode.PRECISE -> 20_000
+        BatteryMode.BALANCED -> 45_000
+        BatteryMode.SAVER -> 90_000
     }
 
     private val motion = object : TriggerEventListener() {
@@ -86,11 +118,37 @@ class LocationController(private val context: Context, private val onLocations: 
                 subscribed = true
             } catch (_: Exception) { subscribed = false }
         }
-        if (p == Profile.STILL) armMotionSensor() else disarmMotionSensor()
+        if (p == Profile.STILL) {
+            armMotionSensor()
+            startPassive()
+            main.removeCallbacks(probe)
+            main.postDelayed(probe, probeInterval())
+        } else {
+            disarmMotionSensor()
+            stopStillHelpers()
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun startPassive() {
+        if (passiveOn) return
+        try {
+            LocationManagerCompat.requestLocationUpdates(lm, LocationManager.PASSIVE_PROVIDER,
+                LocationRequestCompat.Builder(10_000).setMinUpdateDistanceMeters(10f).build(),
+                ContextCompat.getMainExecutor(context), passive)
+            passiveOn = true
+        } catch (_: Exception) { }
+    }
+
+    private fun stopStillHelpers() {
+        main.removeCallbacks(probe)
+        probeSignal?.cancel(); probeSignal = null
+        if (passiveOn) { runCatching { LocationManagerCompat.removeUpdates(lm, passive) }; passiveOn = false }
     }
 
     fun stop() {
         stopUpdates()
+        stopStillHelpers()
         disarmMotionSensor()
         profile = null
     }

@@ -154,4 +154,19 @@ class MapMatcherTest {
         assertEquals("parallel street 20 m away revealed", 0, parallelFalse)
         assertEquals("walked street not revealed", 0, missed)
     }
+
+    @Test fun providerReportingZeroSpeedWhileMovingStillWorks() {
+        // Seen on the Android emulator (and some devices): every fix says speed = 0 m/s.
+        val m = TestWorlds.grid()
+        val e = explorerFor(m)
+        val found = HashSet<String>()
+        var t = 0L
+        var y = 2.0
+        while (y < 298) {
+            val p = TestWorlds.ll(100.0 + rnd.nextGaussian() * 3, y); t += 1000
+            e.onFix(Fix(p.lat, p.lon, 5.0, t, 0.0, 0.0)).segments.forEach { found += it.id }
+            y += 6.0
+        }
+        assertEquals("all three segments of the street", 3, found.size)
+    }
 }

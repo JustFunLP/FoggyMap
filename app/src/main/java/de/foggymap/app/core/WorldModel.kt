@@ -222,7 +222,9 @@ class WorldModel(val data: OsmData) {
 
     private fun parseBuildings(): List<BuildingShape> = data.ways.mapNotNull { w ->
         val b = w.tags["building"] ?: return@mapNotNull null
-        if (b == "no" || w.points.size < 4 || w.nodes.first() != w.nodes.last()) return@mapNotNull null
+        val closed = if (w.nodes.isNotEmpty()) w.nodes.first() == w.nodes.last()
+            else w.points.first().let { f -> val l = w.points.last(); Math.abs(f.lat - l.lat) < 1e-9 && Math.abs(f.lon - l.lon) < 1e-9 }
+        if (b == "no" || w.points.size < 4 || !closed) return@mapNotNull null
         val poly: Polygon = try { gf.createPolygon(w.points.map(proj::toLocal).toTypedArray()) } catch (_: Exception) { null } ?: return@mapNotNull null
         val valid: Polygon = if (poly.isValid) poly else (safe { poly.buffer(0.0) } as? Polygon ?: return@mapNotNull null)
         if (valid.area < 6.0) return@mapNotNull null

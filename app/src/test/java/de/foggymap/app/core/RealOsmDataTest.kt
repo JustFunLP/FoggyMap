@@ -68,4 +68,32 @@ class RealOsmDataTest {
         assertTrue(seg.id in revealed)
         assertTrue("walk revealed too many segments: $revealed", revealed.size <= 3)
     }
+
+    @Test fun fogStaysFastWithManyRevealedAreas() {
+        val m = model
+        val fog = FogBuilder(60.17)
+        val segs = m.segments.filter { it.matchable }.take(1500)
+        var maxUpdateMs = 0.0
+        val t0 = System.nanoTime()
+        segs.chunked(5).forEach { batch ->
+            val items = batch.flatMap { m.reveal(it) }
+            val t = System.nanoTime()
+            fog.add(items)
+            fog.fogGeoJson(0.0); fog.fogGeoJson(9.0); fog.fogGeoJson(24.0)
+            maxUpdateMs = maxOf(maxUpdateMs, (System.nanoTime() - t) / 1e6)
+        }
+        val total = (System.nanoTime() - t0) / 1e6
+        val size = fog.fogGeoJson(24.0).length
+        println("Fog: ${fog.itemCount} items, total ${total.toInt()} ms, slowest incremental update ${maxUpdateMs.toInt()} ms, fog GeoJSON ${size / 1024} KB")
+        assertTrue("incremental fog update too slow: $maxUpdateMs ms", maxUpdateMs < 2500)
+    }
+
+    @Test fun buildingsWithoutNodeIdsAreParsed() {
+        val json = """{"elements":[{"type":"way","id":5,"tags":{"building":"yes","building:levels":"4"},
+            "geometry":[{"lat":60.17,"lon":24.94},{"lat":60.17,"lon":24.9402},{"lat":60.1701,"lon":24.9402},{"lat":60.1701,"lon":24.94},{"lat":60.17,"lon":24.94}]},
+            {"type":"way","id":6,"tags":{"highway":"residential"},"geometry":[{"lat":60.17,"lon":24.94},{"lat":60.171,"lon":24.94}]}]}"""
+        val m = WorldModel(OsmParser.parse(json, box))
+        assertTrue(m.buildings.size == 1 && m.buildings[0].height > 12)
+        assertTrue("streets without node ids are dropped", m.segments.isEmpty())
+    }
 }

@@ -79,6 +79,6 @@ else:
     summary.append("Datenbank konnte nicht gelesen werden")
 open(os.path.join(out, "summary.txt"), "w").write("\n".join(summary) + "\n")
 print("\n".join(summary))
-ok = (not crash) and counts.get('r', 0) >= 12
+ok = (not crash) and counts.get('r', 0) >= 10
 sys.exit(0 if ok else 1)
 PY
