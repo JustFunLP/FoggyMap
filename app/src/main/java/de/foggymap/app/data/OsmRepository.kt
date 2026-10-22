@@ -34,6 +34,7 @@ class OsmRepository(context: Context) {
     private val endpoints = listOf(
         "https://overpass-api.de/api/interpreter",
         "https://overpass.private.coffee/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
         "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
     )
     private val memory = object : LinkedHashMap<CellKey, WorldModel>(8, 0.75f, true) {

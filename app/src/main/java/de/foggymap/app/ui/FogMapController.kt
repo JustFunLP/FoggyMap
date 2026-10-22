@@ -12,9 +12,12 @@ import de.foggymap.app.R
 import de.foggymap.app.core.FogBuilder
 import de.foggymap.app.core.LatLon
 import de.foggymap.app.data.GroupMember
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -85,7 +88,9 @@ import org.maplibre.android.style.sources.GeoJsonSource
 class FogMapController(private val context: Context, private val map: MapLibreMap, private val style: Style) {
     private var fog: FogBuilder? = null
     private var lastSeq = 0L
-    private val mutex = Mutex()
+    /** Refreshes run in their own scope and are conflated: a burst of reveals never cancels a running rebuild. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val pending = Channel<LatLon?>(Channel.CONFLATED)
     private var breathing: ValueAnimator? = null
     private var revealAnim: ValueAnimator? = null
     var animationsEnabled = true
@@ -136,6 +141,17 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         add(SymbolLayer(L_FRIENDS_LABEL, SRC_FRIENDS).withProperties(textField(get("name")), textFont(arrayOf("Noto Sans Bold")),
             textSize(12f), textColor("#E0FBFF"), textHaloColor("#0B0D1A"), textHaloWidth(1.6f), textOffset(arrayOf(0f, 1.4f))))
         setBuildingsVisible(App.prefs.buildings3d)
+        scope.launch { for (hint in pending) runCatching { refresh(hint) }.onFailure { android.util.Log.e(TAG, "fog refresh failed", it) } }
+    }
+
+    /** Diagnostics for debug builds / the emulator test. */
+    fun debugState(): String {
+        val lc = map.locationComponent
+        val cp = map.cameraPosition
+        val active = lc.isLocationComponentActivated
+        return "camera=${cp.target?.latitude?.let { "%.5f".format(it) }},${cp.target?.longitude?.let { "%.5f".format(it) }} z=${"%.1f".format(cp.zoom)} " +
+            "tilt=${cp.tilt.toInt()} puckActive=$active puckEnabled=${active && lc.isLocationComponentEnabled} " +
+            "cameraMode=${if (active) lc.cameraMode else -1} last=${if (active) lc.lastKnownLocation?.let { "%.5f,%.5f".format(it.latitude, it.longitude) } else null}"
     }
 
     private fun addSource(id: String, json: String, tolerance: Float = 0.375f) {
@@ -152,8 +168,12 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         style.getLayer(L_BLDG_NEW)?.setProperties(visibility(vis))
     }
 
-    /** Loads new rows from the database, rebuilds the fog off the main thread and animates the change. */
-    suspend fun refresh(anchorHint: LatLon?) = mutex.withLock {
+    /** Requests a fog update (new database rows). Cheap to call often – requests are merged. */
+    fun requestRefresh(anchorHint: LatLon?) { pending.trySend(anchorHint) }
+
+    fun dispose() { scope.cancel(); stopAmbient(); revealAnim?.cancel() }
+
+    private suspend fun refresh(anchorHint: LatLon?) {
         val items = ArrayList<de.foggymap.app.core.RevealItem>()
         var seq = lastSeq
         withContext(Dispatchers.IO) {
@@ -163,10 +183,11 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
                 items += page; seq = max
             }
         }
-        if (items.isEmpty()) return@withLock
+        if (items.isEmpty()) return
         val initial = fog == null
         val builder = fog ?: FogBuilder(items.firstOrNull()?.polygons?.firstOrNull()?.firstOrNull()?.firstOrNull()?.lat
             ?: anchorHint?.lat ?: 51.0).also { fog = it }
+        val t0 = android.os.SystemClock.elapsedRealtime()
         val out = withContext(Dispatchers.Default) {
             builder.add(items)
             Rendered(
@@ -177,7 +198,8 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
             )
         }
         lastSeq = seq
-        withContext(Dispatchers.Main) { apply(out) }
+        apply(out)
+        android.util.Log.i(TAG, "fog updated: +${items.size} items (total ${builder.itemCount}) in ${android.os.SystemClock.elapsedRealtime() - t0} ms")
     }
 
     private class Rendered(val fogA: String, val fogB: String, val fogC: String, val edge: String, val roads: String,

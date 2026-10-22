@@ -229,7 +229,7 @@ class TrackingService : Service() {
                     }
                     is OsmRepository.Result.Failed -> {
                         android.util.Log.w("FoggyMap", "cell ${cell.name} failed: ${result.message}")
-                        val wait = (30_000L shl attempts.coerceAtMost(5)).coerceAtMost(10 * 60_000L)
+                        val wait = (15_000L shl attempts.coerceAtMost(5)).coerceAtMost(8 * 60_000L)
                         failures[cell] = (attempts + 1) to SystemClock.elapsedRealtime() + wait
                         App.tracking.update {
                             it.copy(loadingMap = false, message = if (result.offline)

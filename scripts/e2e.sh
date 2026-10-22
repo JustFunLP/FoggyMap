@@ -43,10 +43,19 @@ while read -r LON LAT; do
   if [ $n -eq 60 ]; then shot 02-unterwegs; fi
   sleep 1
 done < scripts/e2e_route.txt
-# Stand still at the end for a while (exercises the stationary/battery logic).
-for i in $(seq 1 20); do adb emu geo fix "$LON" "$LAT" > /dev/null; sleep 1; done
-sleep 8
+# Stay at the destination. If the second map cell could not be loaded during the drive (public
+# Overpass servers are often overloaded), the queued positions are replayed once it arrives.
+for i in $(seq 1 120); do
+  adb emu geo fix "$LON" "$LAT" > /dev/null
+  if [ $i -ge 20 ] && [ "$(adb logcat -d -s FoggyMap:I | grep -c 'cell loaded')" -ge 2 ]; then break; fi
+  sleep 2
+done
+sleep 10
 shot 03-ziel
+# Zoomed-out overview of the whole route: switch off follow mode by panning slightly, then pinch-free zoom via double-tap-drag is
+# not available in adb – instead toggle 2D and take another shot.
+adb shell input tap $((1080*90/100)) $((2400*435/1000)); sleep 4; shot 03b-2d
+adb shell input tap $((1080*90/100)) $((2400*435/1000)); sleep 2
 
 # Statistics sheet: tap the bottom card (screen-size independent: 80 % height, centre).
 SIZE=$(adb shell wm size | grep -oE '[0-9]+x[0-9]+' | tail -1); W=${SIZE%x*}; H=${SIZE#*x}

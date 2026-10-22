@@ -123,6 +123,18 @@ jobs:
             --notes "Automatisch gebaut aus ${{ github.sha }}. Auf dem Handy FoggyMap.apk antippen und installieren." \
             --latest
 
+  server-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Koop-Server tests (Node + Cloudflare-Worker-Logik)
+        working-directory: server
+        run: npm test
+
   emulator-test:
     needs: build
     runs-on: ubuntu-24.04

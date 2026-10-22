@@ -152,9 +152,13 @@ fun MainScreen(activity: MainActivity) {
             ?: withContext(Dispatchers.IO) { App.db.lastPosition() }?.let { LatLon(it.first, it.second) }
         if (start != null) c.moveTo(start, 16.6, perspective, animate = false)
         else c.moveTo(LatLon(51.1657, 10.4515), 5.0, false, animate = false)
-        c.refresh(start)
+        c.requestRefresh(start)
     }
-    LaunchedEffect(controller, dbVersion) { controller?.refresh(location?.let { LatLon(it.latitude, it.longitude) }) }
+    LaunchedEffect(controller, dbVersion) { controller?.requestRefresh(location?.let { LatLon(it.latitude, it.longitude) }) }
+    DisposableEffect(controller) { onDispose { controller?.dispose() } }
+    if (de.foggymap.app.BuildConfig.DEBUG) LaunchedEffect(controller) {
+        while (true) { kotlinx.coroutines.delay(10_000); controller?.let { android.util.Log.i("FoggyMap", "ui: " + it.debugState()) } }
+    }
     LaunchedEffect(controller, location, locationEnabled) { location?.let { controller?.updateLocation(it) } }
     LaunchedEffect(controller, tracking.active, follow, locationEnabled, location != null) {
         val c = controller ?: return@LaunchedEffect
