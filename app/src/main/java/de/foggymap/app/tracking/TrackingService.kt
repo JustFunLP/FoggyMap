@@ -154,7 +154,7 @@ class TrackingService : Service() {
             lastLocation = loc
             App.location.value = loc
             if (loc.hasAccuracy() && loc.accuracy <= 35f) lastGoodFixAt = SystemClock.elapsedRealtime()
-            val fix = Fix(loc.latitude, loc.longitude, if (loc.hasAccuracy()) loc.accuracy.toDouble() else 99.0, loc.time,
+            val fix = Fix(loc.latitude, loc.longitude, if (loc.hasAccuracy() && loc.accuracy > 0f) loc.accuracy.toDouble() else 25.0, loc.time,
                 if (loc.hasSpeed()) loc.speed.toDouble() else null,
                 if (loc.hasBearing() && loc.hasSpeed() && loc.speed > 1f) loc.bearing.toDouble() else null)
             enqueue(fix)

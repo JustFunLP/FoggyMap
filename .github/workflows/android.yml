@@ -122,3 +122,49 @@ jobs:
             --title "FoggyMap – neueste Version (Build ${{ github.run_number }})" \
             --notes "Automatisch gebaut aus ${{ github.sha }}. Auf dem Handy FoggyMap.apk antippen und installieren." \
             --latest
+
+  emulator-test:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: FoggyMap-apk
+          path: out
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Emulator test (simulated 1.1 km GPS route through Helsinki)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot
+          script: bash scripts/e2e.sh
+
+      - name: Publish test results
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ls -la e2e-out || true
+          cat e2e-out/summary.txt >> "$GITHUB_STEP_SUMMARY" || true
+          while IFS= read -r line; do echo "::notice::$line"; done < e2e-out/summary.txt || true
+          gh release view e2e-latest >/dev/null 2>&1 || gh release create e2e-latest --draft --title "Emulator-Test (intern)" --notes "Screenshots und Logs des letzten Emulator-Tests"
+          gh release upload e2e-latest e2e-out/*.png e2e-out/summary.txt e2e-out/logcat-app.txt --clobber || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-test
+          path: e2e-out/
+          if-no-files-found: ignore
