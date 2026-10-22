@@ -6,10 +6,10 @@ Alles hier geht im Browser bzw. der GitHub-App auf dem Android-Handy. Ein PC ist
 
 ## 1. App installieren
 
-1. Öffne auf dem Handy **github.com/JustFunLP/FoggyMap/releases** (eingeloggt in dein GitHub-Konto).
+1. Öffne auf dem Handy **github.com/JustFunLP/FoggyMap/releases** (ein GitHub-Konto ist nicht nötig, das Repository ist öffentlich).
 2. Tippe bei **„FoggyMap – neueste Version“** unter *Assets* auf **FoggyMap.apk**.
 3. Nach dem Download auf die Datei tippen. Android fragt beim ersten Mal, ob dein Browser Apps installieren darf: **„Zulassen“** → zurück → **Installieren**.
-4. Spätere Versionen installierst du genauso. Sie werden **über** die alte Version installiert, deine Erkundung bleibt erhalten (gleicher Signierschlüssel).
+4. **Updates kommen danach von selbst:** Beim Öffnen prüft FoggyMap, ob es eine neuere Version gibt, und fragt *„Update verfügbar – Installieren?“*. Beim allerersten Update bittet Android einmalig um die Erlaubnis *„Apps aus dieser Quelle zulassen“* für FoggyMap. Die neue Version wird **über** die alte installiert, deine Erkundung bleibt erhalten (gleicher Signierschlüssel, die Datei wird vor der Installation per Prüfsumme kontrolliert). Von Hand: ⚙ → **„Nach Updates suchen“**.
 
 > Google Play Protect kann warnen („Unbekannte App“). Das ist bei selbst gebauten Apps normal: *Weitere Details → Trotzdem installieren*.
 
@@ -71,7 +71,7 @@ Für das gemeinsame Spielen braucht ihr einen kleinen Server. Empfohlen ist **Cl
 
 1. **Du:** FoggyMap → oben **Koop** → Anzeigename und Gruppenname eintragen → **Gruppe erstellen**.
 2. Auf das **Teilen-Symbol** neben dem Code tippen und die Einladung z. B. per WhatsApp verschicken.
-3. **Die APK an Kollegen geben:** Dein Repository ist privat. Kollegen können den GitHub-Link deshalb nicht öffnen. Schicke ihnen die Datei **FoggyMap.apk** direkt, z. B. per WhatsApp als *Dokument*, über Google Drive oder Quick Share.
+3. **Die APK an Kollegen geben:** Schicke ihnen den Link **github.com/JustFunLP/FoggyMap/releases** (sie brauchen kein GitHub-Konto) und lass sie wie in Abschnitt 1 installieren. Danach aktualisiert sich die App auch bei ihnen von selbst.
 4. **Kollege:** APK installieren → App öffnen → **Koop** → die komplette Einladungsnachricht in das Feld *„Einladung einfügen“* kopieren (oder in WhatsApp lange auf die Nachricht tippen → **Teilen → FoggyMap**) → **Beitreten**.
 5. Ab jetzt sehen alle, was jeder aufdeckt. Synchronisiert wird automatisch alle paar Minuten, nach neuen Funden und sobald wieder Internet da ist.
 

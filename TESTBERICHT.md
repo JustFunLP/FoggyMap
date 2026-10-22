@@ -8,7 +8,9 @@ Stand: 22.10.2026. Alle Ergebnisse stammen aus echten Läufen, die du jederzeit 
 |---|---|
 | Android-Build (GitHub Actions, Ubuntu 24.04, JDK 17, SDK 35) | **erfolgreich**. Jeder Push erzeugt `FoggyMap.apk` (Release, signiert, ~40 MB) und `FoggyMap-debug.apk` |
 | Signierung | eigener, stabiler Schlüssel. Updates lassen sich über die alte Version installieren |
-| Download-Link | Release „FoggyMap – neueste Version“ (wird bei jedem Build ersetzt) |
+| Download-Link | Release „FoggyMap – neueste Version“ (wird bei jedem Build ersetzt). Das Repository ist öffentlich, deshalb funktioniert der Link ohne Anmeldung |
+| Selbst-Update | Die Update-Infos (`version.json`) und die APK sind ohne Anmeldung abrufbar. Die Prüfsumme der heruntergeladenen APK stimmt mit `version.json` überein (geprüft am 22.10.2026) |
+| Geheimnisse | Der Signierschlüssel liegt nur in einem Entwurfs-Release, das ausschließlich Repo-Mitglieder sehen. Das Passwort wird in jeder Workflow-Version vor der Weitergabe maskiert und nirgends ausgegeben. Fremde Forks und Pull-Requests können den Build nicht auslösen |
 
 ## ✅ Automatisch getestet
 
@@ -36,6 +38,7 @@ Beim Wiedereinschalten des Bildschirms stürzte einmal der **OpenGL-Übersetzer 
 
 - **Echtes Gerät, echtes GPS draußen**, insbesondere in Häuserschluchten, unter Bäumen und im Auto.
 - **Akkuverbrauch in Prozent pro Stunde**. Die Sparmaßnahmen sind umgesetzt, aber nicht gemessen.
+- **Selbst-Update auf einem echten Gerät** (Dialog, einmalige Android-Erlaubnis, Installation über die alte Version). Die Serverseite ist geprüft, der Ablauf auf dem Handy noch nicht.
 - **Hersteller-Energiesparmodi** (Samsung, Xiaomi, Huawei …), die Hintergrunddienste beenden können.
 - **Cloudflare-Einrichtung mit deinem Konto**. Workflow und Worker sind getestet, die Einrichtung mit deinem Konto nicht.
 - **Zwei echte Handys gleichzeitig.** Getestet sind App ↔ echter Server im Emulator sowie zwei Spieler in den Server-Tests.
