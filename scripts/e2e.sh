@@ -29,12 +29,12 @@ adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS || true
 adb logcat -G 16M || true
 adb logcat -c
 
-# Pre-seed the two route cells with a real OSM extract (Helsinki, ODbL) so the test does not depend on
+# Pre-seed the street cell and building tiles of the route with a real OSM extract (Helsinki, ODbL) so the test does not depend on
 # the overloaded public Overpass servers. Neighbour cells are still downloaded live by the app.
 gzip -c app/src/test/resources/helsinki_overpass.json > /tmp/helsinki.json.gz
 adb push /tmp/helsinki.json.gz /data/local/tmp/helsinki.json.gz > /dev/null
 adb shell chmod 644 /data/local/tmp/helsinki.json.gz
-for c in c_7521_2078 c_7521_2079; do
+for c in r_3760_1038 r_3760_1039 r_3761_1038 r_3761_1039 b_15041_4155 b_15041_4156 b_15041_4157 b_15041_4158 b_15041_4159 b_15042_4155 b_15042_4156 b_15042_4157 b_15042_4158 b_15042_4159 b_15043_4155 b_15043_4156 b_15043_4157 b_15043_4158 b_15043_4159 b_15044_4155 b_15044_4156 b_15044_4157 b_15044_4158 b_15044_4159; do
   adb shell "run-as $PKG sh -c 'mkdir -p files/osm && cp /data/local/tmp/helsinki.json.gz files/osm/$c.json.gz'"
 done
 adb shell "run-as $PKG ls -la files/osm" || true

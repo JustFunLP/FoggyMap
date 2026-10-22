@@ -15,26 +15,31 @@ class OsmWay(
 class OsmData(val ways: List<OsmWay>, val bbox: BBox)
 
 object OverpassQuery {
-    /**
-     * Streets, footpaths, block boundaries (railways, rivers) and building footprints for one bbox.
-     * `out geom` returns the complete way geometry and node ids even outside the bbox.
-     */
-    fun forBox(b: BBox): String {
-        val box = "${b.south},${b.west},${b.north},${b.east}"
-        // Streets need node ids (junctions); buildings only need tags + geometry ("out tags geom"),
-        // which keeps the download ~30 % smaller in dense cities.
+    private const val HIGHWAY_FILTER =
+        "[\"highway\"][\"highway\"!~\"^(proposed|construction|abandoned|platform|raceway|elevator|bus_stop|rest_area|services|razed)$\"]"
+
+    /** Street network for one cell: streets, railways and rivers with node ids (junctions) and geometry. */
+    fun roads(b: BBox): String {
+        val box = box(b)
         return """
-            [out:json][timeout:40][maxsize:134217728];
+            [out:json][timeout:60][maxsize:134217728];
             (
-              way["highway"]["highway"!~"^(proposed|construction|abandoned|platform|raceway|elevator|bus_stop|rest_area|services|razed)$"]($box);
+              way$HIGHWAY_FILTER($box);
               way["railway"~"^(rail|light_rail|subway|narrow_gauge)$"]($box);
               way["waterway"~"^(river|canal)$"]($box);
             );
             out body geom qt;
-            way["building"]($box);
-            out tags geom qt;
         """.trimIndent()
     }
+
+    /** Building footprints of one small tile (tags + geometry only, no node ids). */
+    fun buildings(b: BBox): String = """
+            [out:json][timeout:40];
+            way["building"](${box(b)});
+            out tags geom qt;
+        """.trimIndent()
+
+    private fun box(b: BBox) = "${b.south},${b.west},${b.north},${b.east}"
 }
 
 object OsmParser {

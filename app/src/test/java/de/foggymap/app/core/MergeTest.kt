@@ -39,7 +39,8 @@ class MergeTest {
 
     @Test fun fogGeoJsonIsWellFormed() {
         val m = TestWorlds.grid()
-        val fog = FogBuilder(51.0).apply { add(revealAlong(m, 100.0, 110..190 step 3)) }
+        val revealed = revealAlong(m, 100.0, 110..190 step 3)
+        val fog = FogBuilder(51.0).apply { add(revealed); add(BuildingRevealer.reveal(BuildingParser.parse(m.data), revealed)) }
         for (g in listOf(0.0, 8.0, 20.0)) {
             val json = org.json.JSONObject(fog.fogGeoJson(g))
             assertEquals("FeatureCollection", json.getString("type"))

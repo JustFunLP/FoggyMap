@@ -17,8 +17,6 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
-class BuildingShape(val id: Long, val polygon: Polygon, val height: Double, val minHeight: Double)
-
 /** A city block: a face of the planar street graph (streets, railways and rivers as boundaries). */
 class Face(val id: String, val polygon: Polygon, val reliable: Boolean) {
     val area: Double = polygon.area
@@ -39,11 +37,9 @@ class WorldModel(val data: OsmData) {
     val gf = GeometryFactory(PrecisionModel(), 0)
     val segments: List<Segment> = RoadNetworkBuilder.build(data, proj, gf)
     val segmentById: Map<String, Segment> = segments.associateBy { it.id }
-    val buildings: List<BuildingShape> = parseBuildings()
     val faces: List<Face>
 
     private val segIndex = STRtree()
-    private val buildingIndex = STRtree()
     private val faceIndex = STRtree()
     private val reliableEnvelope: Envelope
 
@@ -52,7 +48,6 @@ class WorldModel(val data: OsmData) {
         val ne = proj.toLocal(LatLon(data.bbox.north, data.bbox.east))
         reliableEnvelope = Envelope(sw.x + EDGE_MARGIN, ne.x - EDGE_MARGIN, sw.y + EDGE_MARGIN, ne.y - EDGE_MARGIN)
         segments.forEach { segIndex.insert(it.line.envelopeInternal, it) }
-        buildings.forEach { buildingIndex.insert(it.polygon.envelopeInternal, it) }
         faces = buildFaces()
         faces.forEach { faceIndex.insert(it.polygon.envelopeInternal, it) }
     }
@@ -94,17 +89,16 @@ class WorldModel(val data: OsmData) {
      *  1. the street corridor between its two junctions,
      *  2. the city blocks whose boundary runs along this segment (not blocks that merely touch the
      *     junction, so cross streets and parallel streets stay hidden),
-     *  3. for huge/open blocks only a 40 m deep strip, and in areas without closed blocks the
-     *     directly adjacent buildings that are not separated by another street,
-     *  4. every building footprint inside the uncovered area (for 3D rendering and statistics).
+     *  3. for huge/open blocks only a 40 m deep strip; in open settlements without closed blocks a
+     *     30 m strip on both sides that stops at the next street (never reaches across it).
+     * Buildings are not part of the street data: [BuildingRevealer] adds every building inside these
+     * areas once the (lazily loaded) building tile is available.
      */
     fun reveal(segment: Segment): List<RevealItem> {
         val items = ArrayList<RevealItem>()
         val corridor = buffer(segment.line, segment.roadClass.corridorHalfWidth, BufferParameters.CAP_FLAT)
         items += RevealItem("r:${segment.id}", RevealKind.ROAD, RevealItem.polygonsOf(corridor, proj),
             line = segment.points, length = segment.length, name = segment.name)
-        val uncovered = ArrayList<Geometry>()
-        uncovered.add(corridor)
 
         val adjacent = adjacentFaces(segment)
         for (f in adjacent) {
@@ -112,9 +106,8 @@ class WorldModel(val data: OsmData) {
                 val inset = f.polygon.buffer(-BLOCK_INSET)
                 if (inset.isEmpty) continue
                 items += RevealItem("b:${f.id}", RevealKind.BLOCK, RevealItem.polygonsOf(inset, proj))
-                uncovered += inset
             } else {
-                strip(segment, f, STRIP_DEPTH)?.let { (g, item) -> items += item; uncovered += g }
+                strip(segment, f, STRIP_DEPTH)?.let { (_, item) -> items += item }
             }
         }
         if (adjacent.isEmpty() && segment.blockForming.not()) {
@@ -122,39 +115,31 @@ class WorldModel(val data: OsmData) {
             val mid = segment.line.interiorPoint
             @Suppress("UNCHECKED_CAST")
             (faceIndex.query(mid.envelopeInternal) as List<Face>).filter { it.polygon.contains(mid) }.forEach { f ->
-                strip(segment, f, PATH_STRIP_DEPTH)?.let { (g, item) -> items += item; uncovered += g }
+                strip(segment, f, PATH_STRIP_DEPTH)?.let { (_, item) -> items += item }
             }
         }
-        val area = if (uncovered.size == 1) corridor else UnaryUnionOp.union(uncovered)
-
-        val revealedBuildings = HashSet<Long>()
-        @Suppress("UNCHECKED_CAST")
-        for (b in buildingIndex.query(area.envelopeInternal) as List<BuildingShape>) {
-            if (!b.polygon.intersects(area)) continue
-            val inside = area.contains(b.polygon.interiorPoint) ||
-                safeArea { b.polygon.intersection(area).area } >= 0.4 * b.polygon.area
-            if (inside && revealedBuildings.add(b.id)) items += buildingItem(b)
-        }
-        if (adjacent.isEmpty() && segment.blockForming) {
-            // Open settlement without closed blocks: houses along the street, never across another street.
-            val env = segment.line.envelopeInternal.also { it.expandBy(OPEN_BUILDING_DISTANCE) }
-            @Suppress("UNCHECKED_CAST")
-            for (b in buildingIndex.query(env) as List<BuildingShape>) {
-                if (b.id in revealedBuildings) continue
-                if (b.polygon.distance(segment.line) > OPEN_BUILDING_DISTANCE) continue
-                if (separatedByOtherStreet(segment, b.polygon)) continue
-                revealedBuildings += b.id
-                items += buildingItem(b)
-            }
-        }
+        if (adjacent.isEmpty() && segment.blockForming) openStrip(segment)?.let { items += it }
         // Tiny slivers can vanish completely when simplified – never emit an item without geometry.
         return items.filter { it.polygons.isNotEmpty() }
     }
 
-    private fun buildingItem(b: BuildingShape) = RevealItem(
-        "g:${b.id}", RevealKind.BUILDING, RevealItem.polygonsOf(b.polygon.buffer(0.8), proj, 0.3),
-        height = b.height, minHeight = b.minHeight,
-    )
+    /**
+     * Open settlement / country road: both sides up to [OPEN_DISTANCE], cut at every other street so
+     * nothing across a neighbouring street becomes visible.
+     */
+    private fun openStrip(segment: Segment): RevealItem? {
+        val strip = buffer(segment.line, OPEN_DISTANCE, BufferParameters.CAP_FLAT)
+        @Suppress("UNCHECKED_CAST")
+        val others = (segIndex.query(strip.envelopeInternal) as List<Segment>)
+            .filter { it !== segment && it.blockForming && it.line.intersects(strip) }
+            .map { buffer(it.line, 2.5, BufferParameters.CAP_ROUND) }
+        val cut = if (others.isEmpty()) strip else safe { strip.difference(UnaryUnionOp.union(others)) } ?: return null
+        val core = buffer(segment.line, segment.roadClass.corridorHalfWidth + 1.0, BufferParameters.CAP_FLAT)
+        val parts = (0 until cut.numGeometries).map { cut.getGeometryN(it) }.filter { it.intersects(core) && it.area > MIN_BLOCK_AREA }
+        if (parts.isEmpty()) return null
+        val g = UnaryUnionOp.union(parts)
+        return RevealItem("s:${segment.id}~open", RevealKind.AREA, RevealItem.polygonsOf(g, proj))
+    }
 
     private fun strip(segment: Segment, f: Face, depth: Double): Pair<Geometry, RevealItem>? {
         val g = safe { f.polygon.intersection(buffer(segment.line, depth, BufferParameters.CAP_FLAT)).buffer(-BLOCK_INSET / 2) } ?: return null
@@ -173,16 +158,6 @@ class WorldModel(val data: OsmData) {
                 (0 until f.polygon.numInteriorRing).any { h ->
                     safeArea { f.polygon.getInteriorRingN(h).intersection(probe).length } >= need
                 }
-        }
-    }
-
-    private fun separatedByOtherStreet(segment: Segment, building: Polygon): Boolean {
-        val pts = DistanceOp.nearestPoints(segment.line, building)
-        val link = gf.createLineString(arrayOf(pts[0], building.interiorPoint.coordinate))
-        @Suppress("UNCHECKED_CAST")
-        return (segIndex.query(link.envelopeInternal) as List<Segment>).any { other ->
-            other !== segment && other.blockForming && other.line.intersects(link) &&
-                other.line.distance(gf.createPoint(pts[0])) > 1.0
         }
     }
 
@@ -221,22 +196,6 @@ class WorldModel(val data: OsmData) {
         return java.lang.Long.toHexString(h)
     }
 
-    private fun parseBuildings(): List<BuildingShape> = data.ways.mapNotNull { w ->
-        val b = w.tags["building"] ?: return@mapNotNull null
-        val closed = if (w.nodes.isNotEmpty()) w.nodes.first() == w.nodes.last()
-            else w.points.first().let { f -> val l = w.points.last(); Math.abs(f.lat - l.lat) < 1e-9 && Math.abs(f.lon - l.lon) < 1e-9 }
-        if (b == "no" || w.points.size < 4 || !closed) return@mapNotNull null
-        val poly: Polygon = try { gf.createPolygon(w.points.map(proj::toLocal).toTypedArray()) } catch (_: Exception) { null } ?: return@mapNotNull null
-        val valid: Polygon = if (poly.isValid) poly else (safe { poly.buffer(0.0) } as? Polygon ?: return@mapNotNull null)
-        if (valid.area < 6.0) return@mapNotNull null
-        val minH = parseMeters(w.tags["min_height"]) ?: w.tags["building:min_level"]?.toDoubleOrNull()?.times(3.1) ?: 0.0
-        val h = parseMeters(w.tags["height"])
-            ?: w.tags["building:levels"]?.toDoubleOrNull()?.let { it * 3.1 + if (w.tags["roof:shape"].let { r -> r != null && r != "flat" }) 2.5 else 0.6 }
-            ?: defaultHeight(b)
-        val hh = h.coerceIn(2.5, 400.0)
-        BuildingShape(w.id, valid, hh, minH.coerceIn(0.0, hh - 1))
-    }
-
     private fun safe(block: () -> Geometry): Geometry? = try { block() } catch (_: Exception) { null }
     private fun safeArea(block: () -> Double): Double = try { block() } catch (_: Exception) { 0.0 }
 
@@ -254,7 +213,7 @@ class WorldModel(val data: OsmData) {
         const val STRIP_DEPTH = 40.0
         const val PATH_STRIP_DEPTH = 25.0
         const val ADJ_TOLERANCE = 2.0
-        const val OPEN_BUILDING_DISTANCE = 30.0
+        const val OPEN_DISTANCE = 30.0
 
         fun parseMeters(v: String?): Double? {
             if (v == null) return null

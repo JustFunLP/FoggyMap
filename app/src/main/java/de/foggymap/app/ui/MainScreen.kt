@@ -19,6 +19,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -205,8 +206,9 @@ fun MainScreen(activity: MainActivity) {
                 }
             }
             AnimatedVisibility(tracking.active || tracking.message != null, enter = fadeIn() + slideInVertically(), exit = fadeOut() + slideOutVertically()) {
-                StatusPill(tracking)
+                StatusChips(tracking)
             }
+            RevealBanner(tracking)
         }
 
         // Right-hand map controls (as in the design: layers · locate · navigation)
@@ -231,7 +233,7 @@ fun MainScreen(activity: MainActivity) {
 
         // Bottom card
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(horizontal = 14.dp, vertical = 10.dp)) {
-            BottomCard(coverage?.percent, counts, tracking.active, onExpand = { sheet = Sheet.STATS }, onStart = { onStartClicked() })
+            BottomCard(coverage?.percent, counts, tracking, onExpand = { sheet = Sheet.STATS }, onStart = { onStartClicked() })
         }
     }
 
@@ -281,7 +283,15 @@ private fun TopChip(painter: androidx.compose.ui.graphics.painter.Painter, text:
 }
 
 @Composable
-private fun StatusPill(t: de.foggymap.app.TrackingUi) {
+private fun Chip(content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
+    Row(Modifier.height(32.dp).clip(RoundedCornerShape(16.dp)).background(Fog.Surface.copy(alpha = 0.88f))
+        .border(1.dp, Fog.Line, RoundedCornerShape(16.dp)).padding(horizontal = 11.dp),
+        verticalAlignment = Alignment.CenterVertically, content = content)
+}
+
+/** Compact status line: GPS quality · travel mode · GPS pause · loading. */
+@Composable
+private fun StatusChips(t: de.foggymap.app.TrackingUi) {
     val acc = t.accuracy
     val dot = when {
         !t.active -> Fog.Muted
@@ -290,25 +300,67 @@ private fun StatusPill(t: de.foggymap.app.TrackingUi) {
         acc <= 35f -> Fog.Amber
         else -> Fog.Danger
     }
-    val text = buildList {
-        if (t.active) add(if (acc == null) "Suche GPS …" else "GPS ±${acc.toInt()} m")
-        if (t.active && acc != null) add(modeLabel(t.mode))
-        if (t.powerProfile.isNotEmpty() && t.active) add(t.powerProfile)
-        if (t.loadingMap) add("lade Straßen …")
-    }.joinToString(" · ")
     Column(Modifier.padding(top = 8.dp)) {
-        Row(Modifier.clip(RoundedCornerShape(14.dp)).background(Fog.Surface.copy(alpha = 0.88f)).padding(horizontal = 12.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(8.dp).clip(CircleShape).background(dot))
-            Spacer(Modifier.width(8.dp))
-            Text(text.ifEmpty { "Bereit" }, color = Fog.Text, fontSize = 12.sp)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (t.active) Chip {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(dot))
+                Spacer(Modifier.width(7.dp))
+                Text(if (acc == null) "GPS …" else "±${acc.toInt()} m", color = Fog.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+            if (t.active && acc != null) Chip {
+                Icon(painterResource(modeIcon(t.mode)), null, tint = Fog.Lavender, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(5.dp))
+                Text(modeLabel(t.mode), color = Fog.Text, fontSize = 12.sp)
+            }
+            if (t.active && t.powerProfile.startsWith("GPS-Pause")) Chip {
+                Icon(painterResource(R.drawable.ic_battery), null, tint = Fog.Success, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Pause", color = Fog.Text, fontSize = 12.sp)
+            }
+            if (t.loadingMap) Chip {
+                androidx.compose.material3.CircularProgressIndicator(Modifier.size(12.dp), color = Fog.Cyan, strokeWidth = 1.6.dp)
+                Spacer(Modifier.width(6.dp))
+                Text("lade Straßen", color = Fog.Text, fontSize = 12.sp)
+            }
         }
         t.message?.let {
             Spacer(Modifier.height(6.dp))
             Text(it, color = Fog.Amber, fontSize = 12.sp, modifier = Modifier.clip(RoundedCornerShape(12.dp))
-                .background(Fog.Surface.copy(alpha = 0.88f)).padding(horizontal = 12.dp, vertical = 6.dp))
+                .background(Fog.Surface.copy(alpha = 0.9f)).padding(horizontal = 12.dp, vertical = 6.dp))
         }
     }
+}
+
+/** Short banner whenever a new street section is uncovered. */
+@Composable
+private fun RevealBanner(t: de.foggymap.app.TrackingUi) {
+    var shown by remember { mutableStateOf<String?>(null) }
+    var lastCount by remember { mutableStateOf(t.sessionSegments) }
+    LaunchedEffect(t.sessionSegments) {
+        if (t.sessionSegments > lastCount) {
+            shown = t.lastRevealed
+            lastCount = t.sessionSegments
+            kotlinx.coroutines.delay(3200)
+            shown = null
+        } else lastCount = t.sessionSegments
+    }
+    AnimatedVisibility(shown != null, enter = fadeIn() + slideInVertically { -it }, exit = fadeOut() + slideOutVertically { -it }) {
+        Row(Modifier.padding(top = 10.dp).clip(RoundedCornerShape(18.dp)).background(Fog.button)
+            .padding(horizontal = 14.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(painterResource(R.drawable.ic_road), null, tint = Color.White, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Column {
+                Text("Neuer Abschnitt entdeckt", color = Color.White.copy(alpha = 0.8f), fontSize = 10.sp, letterSpacing = 0.8.sp)
+                Text(shown ?: "", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            }
+        }
+    }
+}
+
+private fun modeIcon(m: TravelMode) = when (m) {
+    TravelMode.CAR -> R.drawable.ic_car
+    TravelMode.BIKE -> R.drawable.ic_bike
+    else -> R.drawable.ic_walk
 }
 
 fun modeLabel(m: TravelMode) = when (m) {
@@ -319,43 +371,70 @@ fun modeLabel(m: TravelMode) = when (m) {
 }
 
 @Composable
-private fun BottomCard(percent: Double?, counts: RevealDatabase.Counts?, active: Boolean, onExpand: () -> Unit, onStart: () -> Unit) {
-    val animated by animateFloatAsState((percent ?: 0.0).toFloat(), tween(900), label = "pct")
-    GlassCard(Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable(onClick = onExpand)) {
-            Column(Modifier.weight(1f)) {
-                Text("${animated.toDouble().de(1)} %", color = Fog.Text, fontSize = 30.sp, fontWeight = FontWeight.Bold)
-                Text(if (percent == null) "Starte die Erkundung – der Nebel wartet" else "deiner Umgebung erkundet",
-                    color = Fog.Muted, fontSize = 13.sp)
-            }
-            Box(Modifier.size(40.dp).clip(CircleShape).background(Fog.SurfaceHigh), contentAlignment = Alignment.Center) {
-                Icon(rememberVectorPainter(Icons.Filled.KeyboardArrowUp), "Statistiken", tint = Fog.Lavender)
-            }
+private fun ProgressRing(percent: Float, modifier: Modifier = Modifier) {
+    val sweep = (percent / 100f).coerceIn(0f, 1f) * 360f
+    Box(modifier, contentAlignment = Alignment.Center) {
+        androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+            val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 6.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+            val inset = 3.dp.toPx()
+            val arcSize = androidx.compose.ui.geometry.Size(size.width - 2 * inset, size.height - 2 * inset)
+            val topLeft = androidx.compose.ui.geometry.Offset(inset, inset)
+            drawArc(Color.White.copy(alpha = 0.08f), 0f, 360f, false, topLeft, arcSize, style = stroke)
+            drawArc(Brush.sweepGradient(listOf(Fog.Cyan, Fog.Violet2, Fog.Violet, Fog.Cyan)), -90f, maxOf(sweep, 4f), false, topLeft, arcSize, style = stroke)
         }
-        Spacer(Modifier.height(10.dp))
-        AccentProgress(animated / 100f)
-        Spacer(Modifier.height(12.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            MiniStat("${(counts?.roadKm ?: 0.0).de(1)} km", "Straßen")
-            MiniStat((counts?.roads ?: 0).de(), "Abschnitte")
-            MiniStat((counts?.blocks ?: 0).de(), "Blöcke")
-            MiniStat((counts?.buildings ?: 0).de(), "Gebäude")
-        }
-        Spacer(Modifier.height(14.dp))
-        PrimaryButton(
-            if (active) "Erkundung beenden" else "Erkundung starten",
-            Modifier.fillMaxWidth(),
-            icon = if (active) painterResource(R.drawable.ic_stop) else rememberVectorPainter(Icons.Filled.PlayArrow),
-            secondary = active, onClick = onStart,
-        )
+        Text("${percent.toDouble().de(1)}%", color = Fog.Text, fontSize = 14.sp, fontWeight = FontWeight.Bold)
     }
 }
 
 @Composable
-private fun MiniStat(value: String, label: String) {
-    Column {
-        Text(value, color = Fog.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-        Text(label, color = Fog.Muted, fontSize = 11.sp)
+private fun BottomCard(percent: Double?, counts: RevealDatabase.Counts?, t: de.foggymap.app.TrackingUi, onExpand: () -> Unit, onStart: () -> Unit) {
+    val animated by animateFloatAsState((percent ?: 0.0).toFloat(), tween(900), label = "pct")
+    GlassCard(Modifier.fillMaxWidth(), padding = 14.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable(onClick = onExpand)) {
+            ProgressRing(animated, Modifier.size(66.dp))
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(if (percent == null) "Starte die Erkundung" else "deiner Umgebung erkundet", color = Fog.Muted, fontSize = 12.sp)
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    InlineStat(R.drawable.ic_road, "${(counts?.roadKm ?: 0.0).de(1)} km")
+                    InlineStat(R.drawable.ic_blocks, (counts?.blocks ?: 0).de())
+                    InlineStat(R.drawable.ic_building, (counts?.buildings ?: 0).de())
+                }
+            }
+            Box(Modifier.size(36.dp).clip(CircleShape).background(Fog.SurfaceHigh), contentAlignment = Alignment.Center) {
+                Icon(rememberVectorPainter(Icons.Filled.KeyboardArrowUp), "Statistiken", tint = Fog.Lavender)
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        if (!t.active) {
+            PrimaryButton("Erkundung starten", Modifier.fillMaxWidth(), icon = rememberVectorPainter(Icons.Filled.PlayArrow), onClick = onStart)
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(10.dp).clip(CircleShape).background(Fog.Success))
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("DIESE TOUR", color = Fog.Violet2, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+                    Text("${t.sessionSegments.de()} Abschnitte · ${(t.sessionMeters / 1000).de(2)} km", color = Fog.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Row(Modifier.height(42.dp).clip(RoundedCornerShape(14.dp)).background(Fog.SurfaceHigh)
+                    .border(1.dp, Fog.Danger.copy(alpha = 0.35f), RoundedCornerShape(14.dp)).clickable(onClick = onStart)
+                    .padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(painterResource(R.drawable.ic_stop), null, tint = Fog.Danger, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Beenden", color = Fog.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InlineStat(icon: Int, value: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(painterResource(icon), null, tint = Fog.Lavender, modifier = Modifier.size(14.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(value, color = Fog.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 

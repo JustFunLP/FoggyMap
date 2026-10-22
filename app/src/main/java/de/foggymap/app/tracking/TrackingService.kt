@@ -25,7 +25,10 @@ import de.foggymap.app.BuildConfig
 import de.foggymap.app.MainActivity
 import de.foggymap.app.R
 import de.foggymap.app.TrackingUi
+import de.foggymap.app.core.BuildingRevealer
+import de.foggymap.app.core.BuildingTileKey
 import de.foggymap.app.core.CellKey
+import de.foggymap.app.core.RevealKind
 import de.foggymap.app.core.Explorer
 import de.foggymap.app.core.Fix
 import de.foggymap.app.core.Geo
@@ -64,6 +67,12 @@ class TrackingService : Service() {
     private var queueDirty = false
 
     private val loading = HashSet<CellKey>()
+    private var lastHeading: Double? = null
+
+    // Building tiles are fetched lazily for revealed areas only.
+    private val buildingTilesLoading = HashSet<BuildingTileKey>()
+    private val buildingFailures = HashMap<BuildingTileKey, Pair<Int, Long>>()
+    private val pendingBuildingTiles = LinkedHashSet<BuildingTileKey>()
     private val failures = HashMap<CellKey, Pair<Int, Long>>()   // attempts, retry-at (elapsed ms)
 
     // Battery profile state
@@ -74,6 +83,8 @@ class TrackingService : Service() {
     // Statistics, flushed periodically
     private val distanceBuffer = HashMap<TravelMode, Double>()
     private var sessionSegments = 0
+    private var sessionMeters = 0.0
+    private var lastRevealed: String? = null
     private var startedAt = 0L
     private var lastNotify = 0L
     private var lastLivePush = 0L
@@ -159,6 +170,7 @@ class TrackingService : Service() {
                 if (loc.hasSpeed()) loc.speed.toDouble() else null,
                 if (loc.hasBearing() && loc.hasSpeed() && loc.speed > 1f) loc.bearing.toDouble() else null)
             enqueue(fix)
+            fix.bearing?.let { lastHeading = it }
             updateProfile(fix, loc)
         }
         drain(ex)
@@ -187,24 +199,27 @@ class TrackingService : Service() {
                 return
             }
             queue.removeFirst(); queueDirty = true
-            ex.missingCells(head.pos).forEach { requestCell(it) }   // prefetch neighbours near edges
+            ex.missingCells(head.pos, head.bearing ?: lastHeading).forEach { requestCell(it) }   // prefetch the cell ahead
             val step = ex.onFix(head)
             if (step.result.accepted && step.result.countedDistance > 0) {
+                sessionMeters += step.result.countedDistance
                 val m = step.result.mode.let { if (it == TravelMode.STILL) TravelMode.WALK else it }
                 distanceBuffer[m] = (distanceBuffer[m] ?: 0.0) + step.result.countedDistance
             }
             if (step.items.isNotEmpty()) {
                 val added = withContext(Dispatchers.IO) { App.db.insert(step.items, RevealDatabase.OWNER_ME, synced = false) }
+                if (added.isNotEmpty()) revealBuildingsFor(added)
                 if (added.isNotEmpty()) {
                     android.util.Log.i("FoggyMap", "revealed ${step.segments.joinToString { it.name ?: it.id }}: ${added.size} new items")
                     sessionSegments += step.segments.size
+                    lastRevealed = step.segments.firstNotNullOfOrNull { it.name } ?: "Weg ohne Namen"
                     App.notifyDbChanged()
                     App.sync.requestSync()
                 }
             }
             App.tracking.update {
                 it.copy(mode = step.result.mode, street = step.result.current?.name ?: it.street,
-                    sessionSegments = sessionSegments, loadingMap = false,
+                    sessionSegments = sessionSegments, sessionMeters = sessionMeters, lastRevealed = lastRevealed, loadingMap = false,
                     message = if (step.result.accepted) null else it.message)
             }
         }
@@ -221,10 +236,10 @@ class TrackingService : Service() {
                 loading -= cell
                 when (result) {
                     is OsmRepository.Result.Ok -> {
-                        android.util.Log.i("FoggyMap", "cell loaded ${cell.name}: ${result.model.segments.size} segments, " +
-                            "${result.model.faces.size} blocks, ${result.model.buildings.size} buildings (cache=${result.fromCache})")
+                        android.util.Log.i("FoggyMap", "cell loaded ${cell.name}: ${result.value.segments.size} segments, " +
+                            "${result.value.faces.size} blocks (cache=${result.fromCache})")
                         failures.remove(cell)
-                        explorer?.addCell(cell, result.model)
+                        explorer?.addCell(cell, result.value)
                         App.scope.launch { App.refreshCoverage() }
                         explorer?.let { drain(it) }
                     }
@@ -244,6 +259,52 @@ class TrackingService : Service() {
     }
 
     private fun prefetch(p: LatLon) { CellKey.needed(p).forEach { requestCell(it) } }
+
+    // ------------------------------------------------------------------ buildings (lazy)
+
+    /** New areas were revealed: show the buildings inside them (immediately if the tile is cached). */
+    private suspend fun revealBuildingsFor(newItems: List<de.foggymap.app.core.RevealItem>) {
+        val box = BuildingRevealer.bboxOf(newItems.filter { it.kind != RevealKind.BUILDING }) ?: return
+        for (tile in BuildingTileKey.covering(box)) {
+            val cached = App.osm.cachedBuildings(tile)
+            if (cached != null) storeBuildings(BuildingRevealer.reveal(cached, newItems))
+            else { pendingBuildingTiles += tile; requestBuildingTile(tile) }
+        }
+    }
+
+    private fun requestBuildingTile(tile: BuildingTileKey) {
+        if (tile in buildingTilesLoading) return
+        val (attempts, retryAt) = buildingFailures[tile] ?: (0 to 0L)
+        if (SystemClock.elapsedRealtime() < retryAt) return
+        buildingTilesLoading += tile
+        App.scope.launch {
+            val result = App.osm.loadBuildings(tile)
+            withContext(serial) {
+                buildingTilesLoading -= tile
+                when (result) {
+                    is OsmRepository.Result.Ok -> {
+                        buildingFailures.remove(tile)
+                        pendingBuildingTiles -= tile
+                        // All revealed ground touching this tile (own and from the group) gets its buildings.
+                        val areas = withContext(Dispatchers.IO) { App.db.areasIntersecting(tile.core()) }
+                        val n = storeBuildings(BuildingRevealer.reveal(result.value, areas))
+                        android.util.Log.i("FoggyMap", "buildings ${tile.name}: ${result.value.size} in tile, $n newly visible (cache=${result.fromCache})")
+                    }
+                    is OsmRepository.Result.Failed -> {
+                        val wait = (20_000L shl attempts.coerceAtMost(5)).coerceAtMost(10 * 60_000L)
+                        buildingFailures[tile] = (attempts + 1) to SystemClock.elapsedRealtime() + wait
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun storeBuildings(items: List<de.foggymap.app.core.RevealItem>): Int {
+        if (items.isEmpty()) return 0
+        val added = withContext(Dispatchers.IO) { App.db.insert(items, RevealDatabase.OWNER_ME, synced = false) }
+        if (added.isNotEmpty()) { App.notifyDbChanged(); App.sync.requestSync() }
+        return added.size
+    }
 
     // ------------------------------------------------------------------ battery profile
 
@@ -298,6 +359,7 @@ class TrackingService : Service() {
             }
             if (tick % 2 == 0) flushStats()
             if (tick % 2 == 0 && queueDirty) persistQueue()
+            pendingBuildingTiles.toList().forEach { requestBuildingTile(it) }
             if (tick % 12 == 0) App.sync.requestSync(0)            // every 3 minutes
             explorer?.let { ex -> if (queue.isNotEmpty()) drain(ex) }
             maybeNotify(force = tick % 4 == 0)

@@ -37,6 +37,9 @@ data class TrackingUi(
     val message: String? = null,
     val loadingMap: Boolean = false,
     val sessionSegments: Int = 0,
+    val sessionMeters: Double = 0.0,
+    /** Name of the most recently revealed street (for the "new section" banner). */
+    val lastRevealed: String? = null,
     val queuedFixes: Int = 0,
 )
 

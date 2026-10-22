@@ -4,6 +4,8 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import de.foggymap.app.core.BBox
+import de.foggymap.app.core.BuildingRevealer
 import de.foggymap.app.core.RevealItem
 import de.foggymap.app.core.RevealKind
 import org.json.JSONObject
@@ -12,7 +14,7 @@ import org.json.JSONObject
  * Local, permanent store of everything revealed (own and synced from the group).
  * `seq` gives the map an incremental change feed; `synced = 0` is the offline outbox.
  */
-class RevealDatabase(context: Context) : SQLiteOpenHelper(context, "foggymap.db", null, 1) {
+class RevealDatabase(context: Context) : SQLiteOpenHelper(context, "foggymap.db", null, 2) {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("""
@@ -23,15 +25,31 @@ class RevealDatabase(context: Context) : SQLiteOpenHelper(context, "foggymap.db"
               data TEXT NOT NULL,
               len REAL NOT NULL DEFAULT 0,
               mlat REAL, mlon REAL,
+              s REAL, w REAL, n REAL, e REAL,
               owner TEXT NOT NULL,
               created INTEGER NOT NULL,
               synced INTEGER NOT NULL DEFAULT 0
             )""".trimIndent())
         db.execSQL("CREATE INDEX reveal_outbox ON reveal(synced)")
         db.execSQL("CREATE INDEX reveal_kind ON reveal(kind)")
+        db.execSQL("CREATE INDEX reveal_bbox ON reveal(s, n)")
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {}
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) {
+            // Bounding boxes, so that lazily loaded building tiles can find the revealed areas they touch.
+            for (c in listOf("s", "w", "n", "e")) db.execSQL("ALTER TABLE reveal ADD COLUMN $c REAL")
+            db.execSQL("CREATE INDEX reveal_bbox ON reveal(s, n)")
+            db.rawQuery("SELECT seq, data FROM reveal", null).use { cur ->
+                while (cur.moveToNext()) {
+                    val item = RevealItem.fromJson(JSONObject(cur.getString(1))) ?: continue
+                    val b = BuildingRevealer.bboxOf(listOf(item)) ?: continue
+                    db.execSQL("UPDATE reveal SET s = ?, w = ?, n = ?, e = ? WHERE seq = ?",
+                        arrayOf<Any>(b.south, b.west, b.north, b.east, cur.getLong(0)))
+                }
+            }
+        }
+    }
 
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
@@ -53,6 +71,7 @@ class RevealDatabase(context: Context) : SQLiteOpenHelper(context, "foggymap.db"
                     put("id", it.id); put("kind", it.kind.code); put("data", it.toJson().toString())
                     put("len", it.length); put("owner", owner); put("created", now); put("synced", if (synced) 1 else 0)
                     if (mid != null) { put("mlat", mid.lat); put("mlon", mid.lon) }
+                    BuildingRevealer.bboxOf(listOf(it))?.let { b -> put("s", b.south); put("w", b.west); put("n", b.north); put("e", b.east) }
                 }
                 if (db.insertWithOnConflict("reveal", null, cv, SQLiteDatabase.CONFLICT_IGNORE) != -1L) added += it
             }
@@ -73,6 +92,17 @@ class RevealDatabase(context: Context) : SQLiteOpenHelper(context, "foggymap.db"
             }
         }
         return max to out
+    }
+
+    /** Revealed areas (not buildings) whose bounding box overlaps [b]. */
+    fun areasIntersecting(b: BBox): List<RevealItem> {
+        val out = ArrayList<RevealItem>()
+        readableDatabase.rawQuery(
+            "SELECT data FROM reveal WHERE kind != 'g' AND s <= ? AND n >= ? AND w <= ? AND e >= ?",
+            arrayOf(b.north.toString(), b.south.toString(), b.east.toString(), b.west.toString())).use { c ->
+            while (c.moveToNext()) RevealItem.fromJson(JSONObject(c.getString(0)))?.let(out::add)
+        }
+        return out
     }
 
     fun unsynced(limit: Int): List<RevealItem> {

@@ -26,8 +26,9 @@ class RevealTest {
         val blocks = items.filter { it.kind == RevealKind.BLOCK }
         assertEquals(2, blocks.size)
         assertEquals(1, items.count { it.kind == RevealKind.ROAD })
-        // Exactly the two buildings in the adjacent blocks become visible.
-        val buildings = items.filter { it.kind == RevealKind.BUILDING }
+        assertEquals("street data alone never contains buildings", 0, items.count { it.kind == RevealKind.BUILDING })
+        // Exactly the two buildings in the adjacent blocks become visible once the building tile is there.
+        val buildings = BuildingRevealer.reveal(BuildingParser.parse(m.data), items)
         assertEquals(2, buildings.size)
 
         // The corridor stops at the junctions: points on the cross street just beyond the junction stay hidden.
@@ -62,7 +63,7 @@ class RevealTest {
         val fog = FogBuilder(51.0).apply { add(items) }
         assertTrue(fog.containsPoint(TestWorlds.ll(300.0, 25.0)))
         assertFalse(fog.containsPoint(TestWorlds.ll(300.0, 220.0)))
-        assertEquals(1, items.count { it.kind == RevealKind.BUILDING })
+        assertEquals(1, BuildingRevealer.reveal(BuildingParser.parse(m.data), items).size)
     }
 
     @Test fun openSettlementRevealsHousesAlongTheStreetButNotAcrossAnotherStreet() {
@@ -74,8 +75,14 @@ class RevealTest {
         val m = b.build()
         assertEquals(0, m.faces.size)
         val seg = segmentAt(m, 100.0, 0.0)
-        val ids = m.reveal(seg).filter { it.kind == RevealKind.BUILDING }.map { it.id }
+        val items = m.reveal(seg)
+        assertTrue("open settlement gets a strip", items.any { it.id.endsWith("~open") })
+        val ids = BuildingRevealer.reveal(BuildingParser.parse(m.data), items).map { it.id }
         assertEquals(1, ids.size)
+        // The strip stops at the parallel street.
+        val fog = FogBuilder(51.0).apply { add(items) }
+        assertTrue(fog.containsPoint(TestWorlds.ll(100.0, -20.0)))
+        assertFalse(fog.containsPoint(TestWorlds.ll(100.0, 35.0)))
     }
 
     @Test fun footpathInsideAParkRevealsAStripNotTheWholePark() {

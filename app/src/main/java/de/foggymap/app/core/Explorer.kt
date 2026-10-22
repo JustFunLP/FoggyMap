@@ -2,32 +2,44 @@ package de.foggymap.app.core
 
 import kotlin.math.floor
 
-/** Fixed grid of map cells (~0.9 × 0.9 km) used to load and cache OpenStreetMap data. */
+/**
+ * Fixed grid of street-network cells (~1.8 × 1.7 km in Germany). Only streets, railways and rivers
+ * are loaded per cell (buildings come separately and lazily, see [BuildingTileKey]), so one download
+ * usually covers a whole walk.
+ */
 data class CellKey(val i: Int, val j: Int) {
-    val name get() = "c_${i}_$j"
+    val name get() = "r_${i}_$j"
     /** Cell area expanded by a margin so that junctions of all streets inside the cell are known. */
-    fun queryBox(): BBox = BBox(i * LAT_STEP, j * LON_STEP, (i + 1) * LAT_STEP, (j + 1) * LON_STEP).expand(MARGIN)
+    fun queryBox(): BBox = core().expand(MARGIN)
     fun core(): BBox = BBox(i * LAT_STEP, j * LON_STEP, (i + 1) * LAT_STEP, (j + 1) * LON_STEP)
 
     companion object {
-        const val LAT_STEP = 0.008
-        const val LON_STEP = 0.012
-        const val MARGIN = 350.0
-        /** Load neighbour cells early when closer than this to a cell edge. */
-        const val PREFETCH = 220.0
+        const val LAT_STEP = 0.016
+        const val LON_STEP = 0.024
+        const val MARGIN = 300.0
+        /** Look this far ahead in the direction of travel to load the next cell in time. */
+        const val LOOKAHEAD = 300.0
+        /** Without a known direction, load a neighbour only when this close to its edge. */
+        const val EDGE_PREFETCH = 120.0
 
         fun of(p: LatLon) = CellKey(floor(p.lat / LAT_STEP).toInt(), floor(p.lon / LON_STEP).toInt())
 
-        fun needed(p: LatLon): List<CellKey> {
+        /** Cells needed at [p]: the current one plus, if close, the one ahead (or the nearest neighbour). */
+        fun needed(p: LatLon, heading: Double? = null): List<CellKey> {
             val c = of(p)
             val result = linkedSetOf(c)
-            val near = c.core().let { BBox(it.south, it.west, it.north, it.east) }
-            val inner = near.expand(-PREFETCH)
-            val di = when { p.lat < inner.south -> -1; p.lat > inner.north -> 1; else -> 0 }
-            val dj = when { p.lon < inner.west -> -1; p.lon > inner.east -> 1; else -> 0 }
-            if (di != 0) result += CellKey(c.i + di, c.j)
-            if (dj != 0) result += CellKey(c.i, c.j + dj)
-            if (di != 0 && dj != 0) result += CellKey(c.i + di, c.j + dj)
+            if (heading != null) {
+                val rad = Math.toRadians(heading)
+                val ahead = LatLon(p.lat + LOOKAHEAD * Math.cos(rad) / Geo.M_PER_DEG_LAT,
+                    p.lon + LOOKAHEAD * Math.sin(rad) / (Geo.M_PER_DEG_LAT * Math.cos(Math.toRadians(p.lat))))
+                result += of(ahead)
+            } else {
+                val inner = c.core().expand(-EDGE_PREFETCH)
+                val di = when { p.lat < inner.south -> -1; p.lat > inner.north -> 1; else -> 0 }
+                val dj = when { p.lon < inner.west -> -1; p.lon > inner.east -> 1; else -> 0 }
+                if (di != 0) result += CellKey(c.i + di, c.j)
+                if (dj != 0) result += CellKey(c.i, c.j + dj)
+            }
             return result.toList()
         }
     }
@@ -52,12 +64,19 @@ class Explorer(knownRoadIds: Collection<String>) {
 
     fun hasCell(k: CellKey) = models.containsKey(k)
     fun loadedCells(): Set<CellKey> = models.keys
-    fun missingCells(p: LatLon) = CellKey.needed(p).filter { it !in models }
+    fun missingCells(p: LatLon, heading: Double? = null) = CellKey.needed(p, heading).filter { it !in models }
+
+    private var lastPos: LatLon? = null
 
     fun addCell(k: CellKey, model: WorldModel) {
         models[k] = model
-        // Keep memory bounded: a car trip can cross many cells.
-        while (models.size > 6) models.remove(models.keys.first())
+        // Keep memory bounded (a car trip crosses many cells) – but never drop the cells around the
+        // user: evict the one farthest away.
+        while (models.size > MAX_CELLS) {
+            val here = lastPos ?: break
+            val far = models.keys.maxByOrNull { Geo.distance(it.core().center, here) } ?: break
+            models.remove(far)
+        }
     }
 
     /** Ids of segments synced from friends: they count as known so we do not reveal them again. */
@@ -68,6 +87,7 @@ class Explorer(knownRoadIds: Collection<String>) {
     }
 
     fun onFix(fix: Fix): Step {
+        lastPos = fix.pos
         val result = matcher.process(fix) { pos, radius -> candidates(pos, radius) }
         if (result.newlyConfirmed.isEmpty()) return Step(result, emptyList(), emptyList())
         val items = LinkedHashMap<String, RevealItem>()
@@ -96,6 +116,8 @@ class Explorer(knownRoadIds: Collection<String>) {
         return models.values.filter { it.segmentById[s.id]?.complete == true }
             .minByOrNull { Geo.distance(it.data.bbox.center, mid) }
     }
+
+    companion object { const val MAX_CELLS = 4 }
 
     /** Street length in the loaded cells (complete segments, de-duplicated) — base for the percentage. */
     fun knownStreetLength(): Pair<Double, Double> {

@@ -1,5 +1,6 @@
 package de.foggymap.app.core
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -18,10 +19,11 @@ class RealOsmDataTest {
         val t0 = System.nanoTime()
         val m = model
         val ms = (System.nanoTime() - t0) / 1e6
-        println("Helsinki: ${m.segments.size} segments, ${m.faces.size} faces, ${m.buildings.size} buildings in ${ms.toInt()} ms")
+        val buildings = BuildingParser.parse(m.data)
+        println("Helsinki: ${m.segments.size} segments, ${m.faces.size} faces, ${buildings.size} buildings in ${ms.toInt()} ms")
         assertTrue(m.segments.size > 500)
         assertTrue(m.faces.size > 30)
-        assertTrue(m.buildings.size > 100)
+        assertTrue(buildings.size > 100)
     }
 
     @Test fun everyStreetSegmentRevealsAPlausibleAmount() {
@@ -96,8 +98,26 @@ class RealOsmDataTest {
         val json = """{"elements":[{"type":"way","id":5,"tags":{"building":"yes","building:levels":"4"},
             "geometry":[{"lat":60.17,"lon":24.94},{"lat":60.17,"lon":24.9402},{"lat":60.1701,"lon":24.9402},{"lat":60.1701,"lon":24.94},{"lat":60.17,"lon":24.94}]},
             {"type":"way","id":6,"tags":{"highway":"residential"},"geometry":[{"lat":60.17,"lon":24.94},{"lat":60.171,"lon":24.94}]}]}"""
-        val m = WorldModel(OsmParser.parse(json, box))
-        assertTrue(m.buildings.size == 1 && m.buildings[0].height > 12)
+        val data = OsmParser.parse(json, box)
+        val m = WorldModel(data)
+        val b = BuildingParser.parse(data)
+        assertTrue(b.size == 1 && b[0].height > 12)
         assertTrue("streets without node ids are dropped", m.segments.isEmpty())
+    }
+
+    @Test fun buildingsAppearOnlyInsideRevealedGround() {
+        val m = model
+        val all = BuildingParser.parse(m.data)
+        val seg = m.segments.filter { it.matchable && it.roadClass.vehicular && m.adjacentFaces(it).isNotEmpty() }.maxBy { it.length }
+        val items = m.reveal(seg)
+        val visible = BuildingRevealer.reveal(all, items)
+        println("Helsinki: segment ${seg.name} reveals ${visible.size} of ${all.size} buildings")
+        assertTrue(visible.isNotEmpty())
+        assertTrue(visible.size < all.size / 4)
+        // Lazily loaded tiles: splitting the buildings into tiles gives the same result.
+        val box = BuildingRevealer.bboxOf(items)!!
+        val tiles = BuildingTileKey.covering(box)
+        val perTile = tiles.flatMap { t -> BuildingRevealer.reveal(all.filter { b -> t.queryBox().contains(b.ring[0]) }, items) }
+        assertEquals(visible.map { it.id }.toSet(), perTile.map { it.id }.toSet())
     }
 }
