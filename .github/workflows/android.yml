@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      emulator_test:
+        description: 'Emulator-Test mit simulierter GPS-Fahrt ausführen (~25 min)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -135,8 +140,12 @@ jobs:
         working-directory: server
         run: npm test
 
+  # Runs only when started by hand (Actions → FoggyMap APK → Run workflow → "Emulator-Test" ticked).
+  # A failing emulator test never marks the APK build as failed.
   emulator-test:
     needs: build
+    if: github.event_name == 'workflow_dispatch' && inputs.emulator_test
+    continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
