@@ -34,6 +34,11 @@ class Prefs(context: Context) {
         get() = p.getBoolean("fog_animation", true)
         set(v) = p.edit().putBoolean("fog_animation", v).apply()
 
+    /** Exploration was running when a self-update started – remind the user to reopen the app. */
+    var resumeAfterUpdate: Boolean
+        get() = p.getBoolean("resume_after_update", false)
+        set(v) = p.edit().putBoolean("resume_after_update", v).apply()
+
     /** Set automatically when hardware location batching turned out to lose fixes on this device. */
     var batchingUnreliable: Boolean
         get() = p.getBoolean("batching_unreliable", false)

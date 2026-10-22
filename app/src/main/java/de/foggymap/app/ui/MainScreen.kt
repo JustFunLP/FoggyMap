@@ -250,6 +250,8 @@ fun MainScreen(activity: MainActivity) {
         Sheet.NONE -> {}
     }
 
+    UpdatePrompt()
+
     permissionProblem?.let { msg ->
         AlertDialog(
             onDismissRequest = { permissionProblem = null },

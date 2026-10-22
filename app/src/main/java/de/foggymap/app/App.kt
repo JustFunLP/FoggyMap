@@ -10,6 +10,7 @@ import de.foggymap.app.data.OsmRepository
 import de.foggymap.app.data.Prefs
 import de.foggymap.app.data.RevealDatabase
 import de.foggymap.app.data.SyncManager
+import de.foggymap.app.data.Updater
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -50,6 +51,7 @@ object App {
     lateinit var prefs: Prefs; private set
     lateinit var osm: OsmRepository; private set
     lateinit var sync: SyncManager; private set
+    lateinit var updater: Updater; private set
 
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -67,6 +69,7 @@ object App {
         prefs = Prefs(app)
         osm = OsmRepository(app)
         sync = SyncManager(app, db, prefs)
+        updater = Updater(app)
         sync.init()
         scope.launch { refreshCoverage() }
     }

@@ -48,6 +48,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -432,6 +433,18 @@ fun SettingsSheet(onChanged: () -> Unit, onDataCleared: () -> Unit, onDismiss: (
 
         SectionTitle("Über")
         Text("FoggyMap ${BuildConfig.VERSION_NAME}", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        val update by App.updater.state.collectAsState()
+        if (App.updater.enabled) {
+            TextButton(onClick = { scope.launch { if (App.updater.check(force = true)) App.updater.install() } }) {
+                Text("Nach Updates suchen", color = Fog.Violet2)
+            }
+            when (val u = update) {
+                de.foggymap.app.data.Updater.State.Checking -> Text("Suche …", color = Fog.Muted, fontSize = 12.sp)
+                de.foggymap.app.data.Updater.State.UpToDate -> Text("Du hast die neueste Version.", color = Fog.Success, fontSize = 12.sp)
+                is de.foggymap.app.data.Updater.State.Failed -> Text(u.message, color = Fog.Amber, fontSize = 12.sp)
+                else -> {}
+            }
+        }
         Text("Kartendaten © OpenStreetMap-Mitwirkende (ODbL) · Vektorkacheln: OpenFreeMap / OpenMapTiles · Straßendaten: Overpass API · " +
             "Kartendarstellung: MapLibre Native · Geometrie: JTS Topology Suite.", color = Fog.Muted, fontSize = 11.sp, lineHeight = 15.sp)
         TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.openstreetmap.org/copyright"))) }) {

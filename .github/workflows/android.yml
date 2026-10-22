@@ -123,7 +123,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release delete apk-latest --yes --cleanup-tag 2>/dev/null || true
-          gh release create apk-latest out/FoggyMap.apk \
+          SHA=$(sha256sum out/FoggyMap.apk | cut -d' ' -f1)
+          printf '{"versionCode": %s, "versionName": "1.0.%s", "sha256": "%s", "commit": "%s"}\n' \
+            "${{ github.run_number }}" "${{ github.run_number }}" "$SHA" "${{ github.sha }}" > out/version.json
+          cat out/version.json
+          gh release create apk-latest out/FoggyMap.apk out/version.json \
             --title "FoggyMap – neueste Version (Build ${{ github.run_number }})" \
             --notes "Automatisch gebaut aus ${{ github.sha }}. Auf dem Handy FoggyMap.apk antippen und installieren." \
             --latest
