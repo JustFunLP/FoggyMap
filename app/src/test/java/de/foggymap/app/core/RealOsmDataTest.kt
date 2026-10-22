@@ -31,6 +31,10 @@ class RealOsmDataTest {
         for (s in m.segments.filter { it.matchable && it.roadClass.vehicular }.take(400)) {
             val items = m.reveal(s)
             total++
+            for (it in items) {
+                val back = RevealItem.fromJson(org.json.JSONObject(it.toJson().toString()))
+                assertTrue("item ${it.id} does not survive storage/sync (polygons=${it.polygons.size})", back != null)
+            }
             if (items.any { it.kind == RevealKind.BLOCK }) withBlocks++
             val fog = FogBuilder(60.17).apply { add(items) }
             maxArea = maxOf(maxArea, fog.revealedArea())

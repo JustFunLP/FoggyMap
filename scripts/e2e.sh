@@ -36,13 +36,15 @@ sleep 5
 shot 01-start
 
 # Drive the route: one GPS fix per second (≈ 6 m/s).
+# (adb must not read the loop's stdin – otherwise it swallows the remaining route lines.)
 n=0
-while read -r LON LAT; do
-  adb emu geo fix "$LON" "$LAT" > /dev/null
+while read -r LON LAT <&3; do
+  adb emu geo fix "$LON" "$LAT" > /dev/null < /dev/null
   n=$((n+1))
-  if [ $n -eq 60 ]; then shot 02-unterwegs; fi
+  if [ $n -eq 80 ]; then shot 02-unterwegs < /dev/null; fi
   sleep 1
-done < scripts/e2e_route.txt
+done 3< scripts/e2e_route.txt
+echo "drove $n route points"
 # Stay at the destination. If the second map cell could not be loaded during the drive (public
 # Overpass servers are often overloaded), the queued positions are replayed once it arrives.
 for i in $(seq 1 120); do

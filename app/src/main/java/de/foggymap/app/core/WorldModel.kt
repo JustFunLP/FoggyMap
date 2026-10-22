@@ -147,7 +147,8 @@ class WorldModel(val data: OsmData) {
                 items += buildingItem(b)
             }
         }
-        return items
+        // Tiny slivers can vanish completely when simplified – never emit an item without geometry.
+        return items.filter { it.polygons.isNotEmpty() }
     }
 
     private fun buildingItem(b: BuildingShape) = RevealItem(

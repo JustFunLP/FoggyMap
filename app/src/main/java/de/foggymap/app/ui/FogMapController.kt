@@ -316,15 +316,16 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
             return
         }
         android.util.Log.i(TAG, "camera follow mode $mode, perspective $perspective")
-        when (mode) {
-            Follow.FOLLOW -> lc.cameraMode = CameraMode.TRACKING_GPS
-            Follow.NORTH -> lc.cameraMode = CameraMode.TRACKING_GPS_NORTH
-            Follow.FREE -> lc.cameraMode = CameraMode.NONE
+        val cameraMode = when (mode) {
+            Follow.FOLLOW -> CameraMode.TRACKING_GPS
+            Follow.NORTH -> CameraMode.TRACKING_GPS_NORTH
+            Follow.FREE -> CameraMode.NONE
         }
-        if (mode != Follow.FREE) {
-            lc.zoomWhileTracking(17.2, 900)
-            lc.tiltWhileTracking(if (perspective) 58.0 else 0.0, 900)
-        }
+        if (mode == Follow.FREE) { lc.cameraMode = cameraMode; return }
+        // Zoom and tilt are part of the camera transition itself – zoomWhileTracking() would be
+        // ignored while the transition is still running.
+        val zoom = map.cameraPosition.zoom.let { if (it < 15.0 || it > 19.0) 17.2 else it }
+        lc.setCameraMode(cameraMode, 1200L, zoom, null, if (perspective) 58.0 else 0.0, null)
     }
 
     fun setPerspective(on: Boolean) {

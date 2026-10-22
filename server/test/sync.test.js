@@ -167,3 +167,25 @@ test('cloudflare worker entry point works against D1 semantics', async () => {
   const missing = await worker.fetch(new Request('https://x/health'), {});
   assert.equal(missing.status, 500);
 });
+
+test('contract: reveal items produced by the Android core are accepted and returned unchanged', async () => {
+  const { readFileSync } = await import('node:fs');
+  const items = JSON.parse(readFileSync(new URL('./fixtures/client-items.json', import.meta.url), 'utf8'));
+  const { call } = client();
+  const { code } = (await call('POST', '/v2/groups', { name: 'Vertrag' })).body;
+  let added = 0;
+  for (let i = 0; i < items.length; i += 150) {
+    const r = await call('POST', `/v2/groups/${code}/reveals`, { member: alice, items: items.slice(i, i + 150) });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+    added += r.body.added;
+  }
+  assert.equal(added, items.length);
+  const back = [];
+  let since = 0, more = true;
+  while (more) {
+    const r = await call('GET', `/v2/groups/${code}/reveals?since=${since}`);
+    back.push(...r.body.items); since = r.body.revision; more = r.body.more;
+  }
+  const byId = new Map(back.map(({ by, ...rest }) => [rest.id, rest]));
+  for (const it of items) assert.deepEqual(byId.get(it.id), it);
+});
