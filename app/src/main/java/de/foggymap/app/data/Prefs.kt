@@ -34,6 +34,11 @@ class Prefs(context: Context) {
         get() = p.getBoolean("fog_animation", true)
         set(v) = p.edit().putBoolean("fog_animation", v).apply()
 
+    /** Set automatically when hardware location batching turned out to lose fixes on this device. */
+    var batchingUnreliable: Boolean
+        get() = p.getBoolean("batching_unreliable", false)
+        set(v) = p.edit().putBoolean("batching_unreliable", v).apply()
+
     var perspective: Boolean
         get() = p.getBoolean("perspective", true)
         set(v) = p.edit().putBoolean("perspective", v).apply()

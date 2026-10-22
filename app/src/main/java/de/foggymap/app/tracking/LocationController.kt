@@ -45,9 +45,14 @@ class LocationController(private val context: Context, private val onLocations: 
     private var subscribed = false
     var onSignificantMotion: (() -> Unit)? = null
 
+    /** Hardware batching is not reliable on every device (and not at all on the emulator). */
+    var batchingAllowed = true
+    private var batchDelayMs = 0L
+    private var lastDelivery = android.os.SystemClock.elapsedRealtime()
+
     private val listener = object : LocationListenerCompat {
-        override fun onLocationChanged(location: Location) = onLocations(listOf(location))
-        override fun onLocationChanged(locations: MutableList<Location>) = onLocations(locations.toList())
+        override fun onLocationChanged(location: Location) { lastDelivery = android.os.SystemClock.elapsedRealtime(); onLocations(listOf(location)) }
+        override fun onLocationChanged(locations: MutableList<Location>) { lastDelivery = android.os.SystemClock.elapsedRealtime(); onLocations(locations.toList()) }
         override fun onProviderEnabled(provider: String) {}
         override fun onProviderDisabled(provider: String) {}
     }
@@ -100,7 +105,9 @@ class LocationController(private val context: Context, private val onLocations: 
         profile = p
         stopUpdates()
         val params = params(p)
-        val batch = if (!screenOn && mode != BatteryMode.PRECISE && p != Profile.STILL) params.interval * params.batchFactor else 0L
+        val batch = if (batchingAllowed && !screenOn && mode != BatteryMode.PRECISE && p != Profile.STILL) params.interval * params.batchFactor else 0L
+        batchDelayMs = batch
+        lastDelivery = android.os.SystemClock.elapsedRealtime()
         val request = LocationRequestCompat.Builder(params.interval)
             .setQuality(params.quality)
             .setMinUpdateDistanceMeters(params.minDistance)
@@ -144,6 +151,20 @@ class LocationController(private val context: Context, private val onLocations: 
         main.removeCallbacks(probe)
         probeSignal?.cancel(); probeSignal = null
         if (passiveOn) { runCatching { LocationManagerCompat.removeUpdates(lm, passive) }; passiveOn = false }
+    }
+
+    /**
+     * Called periodically by the service. If batched delivery produced nothing for far longer than the
+     * batch period, the device's batching is broken: switch it off for good and re-subscribe.
+     * Returns true when batching was disabled.
+     */
+    fun checkBatchingStall(): Boolean {
+        if (batchDelayMs <= 0 || profile == null || profile == Profile.STILL) return false
+        val silent = android.os.SystemClock.elapsedRealtime() - lastDelivery
+        if (silent < maxOf(60_000L, batchDelayMs * 3)) return false
+        batchingAllowed = false
+        profile?.let { apply(it, force = true) }
+        return true
     }
 
     fun stop() {

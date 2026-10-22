@@ -91,6 +91,7 @@ class TrackingService : Service() {
         super.onCreate()
         createChannel(this)
         locations = LocationController(this) { list -> scope.launch { onLocations(list) } }
+        locations.batchingAllowed = !App.prefs.batchingUnreliable
         locations.onSignificantMotion = { scope.launch { wake("Bewegung erkannt") } }
         val pm = getSystemService(PowerManager::class.java)
         locations.configure(App.prefs.batteryMode, screenOn = pm?.isInteractive ?: true)
@@ -287,6 +288,11 @@ class TrackingService : Service() {
             tick++
             val now = SystemClock.elapsedRealtime()
             // No usable GPS for 3 min (indoors/tunnel): stop searching, wait for movement.
+            if (locations.checkBatchingStall()) {
+                android.util.Log.w("FoggyMap", "GPS batching delivered nothing – disabled on this device")
+                App.prefs.batchingUnreliable = true
+                lastGoodFixAt = now
+            }
             if (locations.current != LocationController.Profile.STILL && now - lastGoodFixAt > NO_SIGNAL_MS) {
                 setProfile(LocationController.Profile.STILL)
             }

@@ -52,22 +52,22 @@ done
 sleep 5
 shot 01-start
 
-# Drive the route like a real trip: the app is put into the background for the first half and the
-# screen is switched off for the second half (phone in the pocket). Only the foreground service runs.
-# (This also keeps the software-rendered CI emulator responsive.)
-adb shell input keyevent KEYCODE_HOME
-sleep 3
+# Drive the route like a real trip: first third with the app open (map follows), second third with the
+# app in the background, last third with the screen off (phone in the pocket).
 TOTAL=$(wc -l < scripts/e2e_route.txt)
 n=0
 while read -r LON LAT <&3; do
   adb emu geo fix "$LON" "$LAT" > /dev/null < /dev/null
   n=$((n+1))
-  if [ $n -eq $((TOTAL/2)) ]; then adb shell input keyevent KEYCODE_SLEEP < /dev/null; echo "screen off after $n points"; fi
+  if [ $n -eq $((TOTAL/3)) ]; then shot 02-unterwegs < /dev/null; adb shell input keyevent KEYCODE_HOME < /dev/null; echo "background after $n points"; fi
+  if [ $n -eq $((TOTAL*2/3)) ]; then adb shell input keyevent KEYCODE_SLEEP < /dev/null; echo "screen off after $n points"; fi
   sleep 1
 done 3< scripts/e2e_route.txt
 echo "drove $n route points"
-# Stay at the destination until all queued positions could be processed.
+# Stay at the destination (screen still off) until all queued positions could be processed.
 for i in $(seq 1 45); do adb emu geo fix "$LON" "$LAT" > /dev/null; sleep 2; done
+adb exec-out run-as $PKG cat databases/foggymap.db > "$OUT/foggymap.db" 2>/dev/null || true
+adb exec-out run-as $PKG cat databases/foggymap.db-wal > "$OUT/foggymap.db-wal" 2>/dev/null || true
 
 adb shell input keyevent KEYCODE_WAKEUP
 sleep 2
@@ -91,8 +91,6 @@ adb shell input keyevent KEYCODE_BACK; sleep 1
 sleep 30
 kill $SERVER_PID 2>/dev/null || true
 cp /tmp/foggy-e2e.db* "$OUT/" 2>/dev/null || true
-adb exec-out run-as $PKG cat databases/foggymap.db > "$OUT/foggymap.db" 2>/dev/null || true
-adb exec-out run-as $PKG cat databases/foggymap.db-wal > "$OUT/foggymap.db-wal" 2>/dev/null || true
 adb logcat -d > "$OUT/logcat-full.txt"
 grep -E "FoggyMap|FoggyMatcher|AndroidRuntime|FATAL|maplibre|MapLibre|foggymap" "$OUT/logcat-full.txt" > "$OUT/logcat-app.txt" || true
 
@@ -104,6 +102,10 @@ summary = []
 log = open(os.path.join(out, "logcat-full.txt"), errors="ignore").read().splitlines()
 # Only crashes of FoggyMap count (the emulator image's own apps sometimes crash).
 crash = any("FATAL EXCEPTION" in l and i + 1 < len(log) and "de.foggymap" in log[i + 1] for i, l in enumerate(log))
+native = [log[i + 1] for i, l in enumerate(log) if ">>> de.foggymap" in l and i + 1 < len(log)]
+gl_driver = any("libGLESv2_enc.so" in l for l in log if " F DEBUG " in l)
+if native:
+    summary.append("Nativer Absturz: " + ("im OpenGL-Übersetzer des Emulators (libGLESv2_enc.so)" if gl_driver else "JA"))
 live = [l for l in log if "FoggyMap" in l and ("cache=false" in l or "failed:" in l)]
 summary.append("Live-Download Overpass: " + ("; ".join(l.split("FoggyMap: ")[-1] for l in live[:3]) if live else "nicht nötig/keiner"))
 summary.append(f"App-Absturz im Log: {'JA' if crash else 'nein'}")
@@ -131,6 +133,6 @@ if os.path.exists(sdb):
         summary.append(f"Koop-Server-DB nicht lesbar: {e}")
 open(os.path.join(out, "summary.txt"), "w").write("\n".join(summary) + "\n")
 print("\n".join(summary))
-ok = (not crash) and counts.get('r', 0) >= 10
+ok = (not crash) and counts.get('r', 0) >= 12
 sys.exit(0 if ok else 1)
 PY

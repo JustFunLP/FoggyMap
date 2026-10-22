@@ -38,7 +38,7 @@ class MainActivity : ComponentActivity() {
                 override fun onError(message: String) {}
             })
         }
-        handleIntent(intent)
+        if (savedInstanceState == null) handleIntent(intent)
         setContent { FoggyTheme { FoggyRoot(this) } }
     }
 
