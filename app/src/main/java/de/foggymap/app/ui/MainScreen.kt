@@ -211,7 +211,6 @@ fun MainScreen(activity: MainActivity) {
                 perspective = !perspective
                 App.prefs.perspective = perspective
                 controller?.setPerspective(perspective)
-                if (follow != FogMapController.Follow.FREE) controller?.setFollow(follow, perspective)
             }
             RoundButton(painterResource(R.drawable.ic_crosshair), "Auf mich zentrieren", active = follow == FogMapController.Follow.NORTH) {
                 val loc = location

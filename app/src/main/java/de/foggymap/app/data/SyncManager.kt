@@ -57,7 +57,11 @@ class SyncManager(private val context: Context, private val db: RevealDatabase, 
     private val json = "application/json; charset=utf-8".toMediaType()
 
     val server: String get() = prefs.server.ifEmpty { BuildConfig.DEFAULT_SERVER }
-    val configured get() = Invite.isValidServer(server) && prefs.groupCode.isNotEmpty()
+    val configured get() = validServer(server) && prefs.groupCode.isNotEmpty()
+
+    /** HTTPS only. Debug builds additionally accept the emulator host (automated end-to-end test). */
+    private fun validServer(url: String) = Invite.isValidServer(url) ||
+        (BuildConfig.DEBUG && Regex("^http://10\\.0\\.2\\.2:[0-9]{2,5}$").matches(url))
 
     fun init() {
         refreshState()
@@ -131,6 +135,7 @@ class SyncManager(private val context: Context, private val db: RevealDatabase, 
                     if (!o.optBoolean("more")) break
                 }
                 if (anyNew) App.notifyDbChanged(remoteRoads = newRoads)
+                android.util.Log.i("FoggyMap", "sync ok: revision $since, ${db.unsyncedCount()} waiting for upload")
                 // 3) group overview
                 val g = call(Request.Builder().url(base).get().build())
                 if (g.first == 200 && g.second != null) applyGroup(g.second!!)
@@ -167,11 +172,12 @@ class SyncManager(private val context: Context, private val db: RevealDatabase, 
     suspend fun createGroup(name: String, serverUrl: String?): Result<String> = withContext(Dispatchers.IO) {
         try {
             serverUrl?.let { if (it.isNotBlank()) prefs.server = it }
-            if (!Invite.isValidServer(server)) return@withContext Result.failure(SyncError("Bitte eine gültige https://-Serveradresse eintragen."))
+            if (!validServer(server)) return@withContext Result.failure(SyncError("Bitte eine gültige https://-Serveradresse eintragen."))
             val body = JSONObject().put("name", name.trim().ifEmpty { "FoggyMap-Gruppe" })
             val rsp = call(Request.Builder().url("$server/v2/groups").post(body.toString().toRequestBody(json)).build())
             if (rsp.first != 201) return@withContext Result.failure(SyncError(rsp.second?.optString("error") ?: "Server antwortet ${rsp.first}"))
             val code = rsp.second!!.getString("code")
+            android.util.Log.i("FoggyMap", "group created $code")
             enterGroup(code, rsp.second!!.optString("name", name))
             syncNow()
             Result.success(code)
@@ -181,7 +187,7 @@ class SyncManager(private val context: Context, private val db: RevealDatabase, 
     suspend fun joinGroup(input: String, serverUrl: String?): Result<String> = withContext(Dispatchers.IO) {
         val parsed = Invite.parse(input) ?: return@withContext Result.failure(SyncError("Kein gültiger Gruppencode (12 Zeichen, z. B. A7K9-P3QX-M2TF)."))
         val target = (parsed.server ?: serverUrl?.takeIf { it.isNotBlank() } ?: server).trimEnd('/')
-        if (!Invite.isValidServer(target)) return@withContext Result.failure(SyncError("Keine gültige https://-Serveradresse. Füge die komplette Einladung ein."))
+        if (!validServer(target)) return@withContext Result.failure(SyncError("Keine gültige https://-Serveradresse. Füge die komplette Einladung ein."))
         try {
             val rsp = call(Request.Builder().url("$target/v2/groups/${parsed.code}").get().build())
             when (rsp.first) {
@@ -227,7 +233,7 @@ class SyncManager(private val context: Context, private val db: RevealDatabase, 
     }
 
     suspend fun clearLive() = withContext(Dispatchers.IO) {
-        if (!Invite.isValidServer(server) || prefs.groupCode.isEmpty()) return@withContext
+        if (!validServer(server) || prefs.groupCode.isEmpty()) return@withContext
         try { call(Request.Builder().url("$server/v2/groups/${prefs.groupCode}/live?member=${prefs.memberId}").delete().build()) } catch (_: IOException) { }
     }
 

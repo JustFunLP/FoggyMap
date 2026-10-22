@@ -12,6 +12,12 @@ shot() {
   adb exec-out screencap -p > "$OUT/$1.png"; echo "screenshot $1"
 }
 
+# Local group-sync server (the real Node.js server from server/) reachable from the emulator as 10.0.2.2.
+rm -f /tmp/foggy-e2e.db*
+PORT=8787 DB_FILE=/tmp/foggy-e2e.db node server/src/node-server.js > "$OUT/server.log" 2>&1 &
+SERVER_PID=$!
+sleep 1
+
 adb wait-for-device
 adb shell settings put secure location_mode 3 || true
 # A software-rendered CI emulator is slow; never show "isn't responding" dialogs over the app.
@@ -22,10 +28,20 @@ adb shell pm grant $PKG android.permission.ACCESS_FINE_LOCATION || true
 adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS || true
 adb logcat -c
 
+# Pre-seed the two route cells with a real OSM extract (Helsinki, ODbL) so the test does not depend on
+# the overloaded public Overpass servers. Neighbour cells are still downloaded live by the app.
+gzip -c app/src/test/resources/helsinki_overpass.json > /tmp/helsinki.json.gz
+adb push /tmp/helsinki.json.gz /data/local/tmp/helsinki.json.gz > /dev/null
+adb shell chmod 644 /data/local/tmp/helsinki.json.gz
+for c in c_7521_2078 c_7521_2079; do
+  adb shell "run-as $PKG sh -c 'mkdir -p files/osm && cp /data/local/tmp/helsinki.json.gz files/osm/$c.json.gz'"
+done
+adb shell "run-as $PKG ls -la files/osm" || true
+
 read -r LON LAT < scripts/e2e_route.txt
 for i in 1 2 3; do adb emu geo fix "$LON" "$LAT"; sleep 1; done
 
-adb shell am start -n $PKG/de.foggymap.app.MainActivity --ez e2e_autostart true
+adb shell am start -n $PKG/de.foggymap.app.MainActivity --ez e2e_autostart true --es e2e_server http://10.0.2.2:8787
 # Wait until the street data of the start cell is loaded (Overpass can take a while).
 for i in $(seq 1 90); do
   adb emu geo fix "$LON" "$LAT" > /dev/null
@@ -66,6 +82,10 @@ adb shell input keyevent KEYCODE_BACK; sleep 2
 adb shell input tap $((W*73/100)) $((H*85/1000)); sleep 3; shot 05-koop
 adb shell input keyevent KEYCODE_BACK; sleep 1
 
+# Give the app a moment to upload the last reveals (sync is debounced by ~20 s).
+sleep 30
+kill $SERVER_PID 2>/dev/null || true
+cp /tmp/foggy-e2e.db* "$OUT/" 2>/dev/null || true
 adb exec-out run-as $PKG cat databases/foggymap.db > "$OUT/foggymap.db" 2>/dev/null || true
 adb exec-out run-as $PKG cat databases/foggymap.db-wal > "$OUT/foggymap.db-wal" 2>/dev/null || true
 adb logcat -d > "$OUT/logcat-full.txt"
@@ -76,7 +96,11 @@ import sqlite3, sys, os, shutil
 out = sys.argv[1]
 db = os.path.join(out, "foggymap.db")
 summary = []
-crash = "FATAL EXCEPTION" in open(os.path.join(out, "logcat-full.txt"), errors="ignore").read()
+log = open(os.path.join(out, "logcat-full.txt"), errors="ignore").read().splitlines()
+# Only crashes of FoggyMap count (the emulator image's own apps sometimes crash).
+crash = any("FATAL EXCEPTION" in l and i + 1 < len(log) and "de.foggymap" in log[i + 1] for i, l in enumerate(log))
+live = [l for l in log if "FoggyMap" in l and ("cache=false" in l or "failed:" in l)]
+summary.append("Live-Download Overpass: " + ("; ".join(l.split("FoggyMap: ")[-1] for l in live[:3]) if live else "nicht nötig/keiner"))
 summary.append(f"App-Absturz im Log: {'JA' if crash else 'nein'}")
 counts = {}
 if os.path.getsize(db) > 0:
@@ -88,6 +112,18 @@ if os.path.getsize(db) > 0:
                    f"{counts.get('s',0)} Teilflächen, {counts.get('g',0)} Gebäude")
 else:
     summary.append("Datenbank konnte nicht gelesen werden")
+server_items = 0
+sdb = os.path.join(out, "foggy-e2e.db")
+if os.path.exists(sdb):
+    try:
+        scon = sqlite3.connect(sdb)
+        server_items = scon.execute("select count(*) from items").fetchone()[0]
+        groups = scon.execute("select count(*) from groups").fetchone()[0]
+        members = [r[0] for r in scon.execute("select name from members")]
+        summary.append(f"Koop-Server: {groups} Gruppe(n), Mitglieder {members}, {server_items} synchronisierte Elemente "
+                       f"(App: {sum(counts.values())})")
+    except Exception as e:
+        summary.append(f"Koop-Server-DB nicht lesbar: {e}")
 open(os.path.join(out, "summary.txt"), "w").write("\n".join(summary) + "\n")
 print("\n".join(summary))
 ok = (not crash) and counts.get('r', 0) >= 10

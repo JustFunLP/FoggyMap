@@ -1,9 +1,9 @@
 package de.foggymap.app.ui
 
 import android.animation.ValueAnimator
-import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
+import androidx.core.graphics.drawable.toBitmap
 import android.location.Location
 import android.view.animation.DecelerateInterpolator
 import android.view.animation.LinearInterpolator
@@ -22,11 +22,6 @@ import kotlinx.coroutines.withContext
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
-import org.maplibre.android.location.LocationComponentActivationOptions
-import org.maplibre.android.location.LocationComponentOptions
-import org.maplibre.android.location.OnCameraTrackingChangedListener
-import org.maplibre.android.location.modes.CameraMode
-import org.maplibre.android.location.modes.RenderMode
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
 import org.maplibre.android.style.expressions.Expression.color
@@ -45,6 +40,15 @@ import org.maplibre.android.style.layers.LineLayer
 import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory.circleBlur
 import org.maplibre.android.style.layers.PropertyFactory.circleColor
+import org.maplibre.android.style.layers.PropertyFactory.circleOpacity
+import org.maplibre.android.style.layers.PropertyFactory.circlePitchAlignment
+import org.maplibre.android.style.layers.PropertyFactory.iconAllowOverlap
+import org.maplibre.android.style.layers.PropertyFactory.iconIgnorePlacement
+import org.maplibre.android.style.layers.PropertyFactory.iconImage
+import org.maplibre.android.style.layers.PropertyFactory.iconPitchAlignment
+import org.maplibre.android.style.layers.PropertyFactory.iconRotate
+import org.maplibre.android.style.layers.PropertyFactory.iconRotationAlignment
+import org.maplibre.android.style.layers.PropertyFactory.iconSize
 import org.maplibre.android.style.layers.PropertyFactory.circleRadius
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeColor
 import org.maplibre.android.style.layers.PropertyFactory.circleStrokeWidth
@@ -141,17 +145,15 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         add(SymbolLayer(L_FRIENDS_LABEL, SRC_FRIENDS).withProperties(textField(get("name")), textFont(arrayOf("Noto Sans Bold")),
             textSize(12f), textColor("#E0FBFF"), textHaloColor("#0B0D1A"), textHaloWidth(1.6f), textOffset(arrayOf(0f, 1.4f))))
         setBuildingsVisible(App.prefs.buildings3d)
+        installPuck()
         scope.launch { for (hint in pending) runCatching { refresh(hint) }.onFailure { android.util.Log.e(TAG, "fog refresh failed", it) } }
     }
 
     /** Diagnostics for debug builds / the emulator test. */
     fun debugState(): String {
-        val lc = map.locationComponent
         val cp = map.cameraPosition
-        val active = lc.isLocationComponentActivated
-        return "camera=${cp.target?.latitude?.let { "%.5f".format(it) }},${cp.target?.longitude?.let { "%.5f".format(it) }} z=${"%.1f".format(cp.zoom)} " +
-            "tilt=${cp.tilt.toInt()} puckActive=$active puckEnabled=${active && lc.isLocationComponentEnabled} " +
-            "cameraMode=${if (active) lc.cameraMode else -1} last=${if (active) lc.lastKnownLocation?.let { "%.5f,%.5f".format(it.latitude, it.longitude) } else null}"
+        return "camera=${cp.target?.latitude?.let { "%.5f".format(it) }},${cp.target?.longitude?.let { "%.5f".format(it) }} " +
+            "z=${"%.1f".format(cp.zoom)} tilt=${cp.tilt.toInt()} follow=$follow puck=${shown?.let { "%.5f,%.5f".format(it.latitude, it.longitude) }}"
     }
 
     private fun addSource(id: String, json: String, tolerance: Float = 0.375f) {
@@ -171,7 +173,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
     /** Requests a fog update (new database rows). Cheap to call often – requests are merged. */
     fun requestRefresh(anchorHint: LatLon?) { pending.trySend(anchorHint) }
 
-    fun dispose() { scope.cancel(); stopAmbient(); revealAnim?.cancel() }
+    fun dispose() { scope.cancel(); stopAmbient(); revealAnim?.cancel(); puckAnim?.cancel() }
 
     private suspend fun refresh(anchorHint: LatLon?) {
         val items = ArrayList<de.foggymap.app.core.RevealItem>()
@@ -270,70 +272,105 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         source(SRC_FRIENDS)?.setGeoJson(FogBuilder.featureCollection(features))
     }
 
-    // ------------------------------------------------------------------ location puck & camera
-
-    @SuppressLint("MissingPermission")
-    fun enableLocation(): Boolean {
-        val lc = map.locationComponent
-        if (!lc.isLocationComponentActivated) {
-            val opts = LocationComponentOptions.builder(context)
-                .foregroundTintColor(Color.parseColor(LAVENDER))
-                .backgroundTintColor(Color.WHITE)
-                .bearingTintColor(Color.parseColor(VIOLET))
-                .gpsDrawable(R.drawable.ic_puck_arrow)
-                .accuracyColor(Color.parseColor(VIOLET))
-                .accuracyAlpha(0.12f)
-                // No pulsing: a pulse animates the map at 60 fps all the time and costs battery.
-                .build()
-            lc.activateLocationComponent(LocationComponentActivationOptions.builder(context, style)
-                .locationComponentOptions(opts).useDefaultLocationEngine(false).build())
-            lc.addOnCameraTrackingChangedListener(object : OnCameraTrackingChangedListener {
-                override fun onCameraTrackingDismissed() { onTrackingDismissed?.invoke() }
-                override fun onCameraTrackingChanged(currentMode: Int) {}
-            })
-        }
-        return try {
-            lc.isLocationComponentEnabled = true
-            lc.renderMode = RenderMode.GPS
-            true
-        } catch (e: Exception) {
-            android.util.Log.w(TAG, "location component could not be enabled", e)
-            false
-        }
-    }
-
-    fun updateLocation(loc: Location) {
-        val lc = map.locationComponent
-        if (lc.isLocationComponentActivated && lc.isLocationComponentEnabled) lc.forceLocationUpdate(loc)
-    }
+    // ------------------------------------------------------------------ own location puck & camera follow
+    //
+    // FoggyMap draws its own position arrow (a symbol layer above everything, so the fog can never
+    // hide it) and moves the camera itself. That is simpler and cheaper than MapLibre's
+    // LocationComponent, whose animators render continuously.
 
     enum class Follow { FOLLOW, NORTH, FREE }
 
+    var follow = Follow.FOLLOW; private set
+    private var perspectiveOn = true
+    private var shown: LatLng? = null
+    private var heading = 0.0
+    private var lastLoc: Location? = null
+    private var puckAnim: ValueAnimator? = null
+
+    private fun installPuck() {
+        val d = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_puck_arrow)!!
+        val px = (44 * context.resources.displayMetrics.density).toInt()
+        style.addImage(IMG_PUCK, d.toBitmap(px, px))
+        addSource(SRC_ME, FogBuilder.EMPTY)
+        // Always on top of fog, buildings and labels.
+        style.addLayer(CircleLayer(L_ME_GLOW, SRC_ME).withProperties(circleRadius(26f), circleColor(VIOLET),
+            circleOpacity(0.28f), circleBlur(0.9f), circlePitchAlignment(Property.CIRCLE_PITCH_ALIGNMENT_MAP)))
+        style.addLayer(SymbolLayer(L_ME, SRC_ME).withProperties(iconImage(IMG_PUCK), iconRotate(get("b")),
+            iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP), iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_MAP),
+            iconAllowOverlap(true), iconIgnorePlacement(true), iconSize(1.0f)))
+        map.addOnCameraMoveStartedListener { reason ->
+            if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE && follow != Follow.FREE) {
+                follow = Follow.FREE
+                onTrackingDismissed?.invoke()
+            }
+        }
+    }
+
+    /** Kept for API symmetry with the permission flow; the own puck needs no activation. */
+    fun enableLocation(): Boolean = true
+
+    fun updateLocation(loc: Location) {
+        val prev = lastLoc
+        lastLoc = loc
+        if (loc.hasBearing() && loc.hasSpeed() && loc.speed > 1.0f) heading = loc.bearing.toDouble()
+        else if (prev != null) {
+            val d = FloatArray(2)
+            Location.distanceBetween(prev.latitude, prev.longitude, loc.latitude, loc.longitude, d)
+            if (d[0] > 6f) heading = ((d[1] + 360f) % 360f).toDouble()
+        }
+        val target = LatLng(loc.latitude, loc.longitude)
+        val from = shown
+        puckAnim?.cancel()
+        if (from == null || !animationsEnabled) { setPuck(target) }
+        else puckAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 850
+            interpolator = DecelerateInterpolator()
+            addUpdateListener { a ->
+                val t = a.animatedValue as Float
+                setPuck(LatLng(from.latitude + (target.latitude - from.latitude) * t, from.longitude + (target.longitude - from.longitude) * t))
+            }
+            start()
+        }
+        followCamera(target, 850)
+    }
+
+    private fun setPuck(p: LatLng) {
+        shown = p
+        source(SRC_ME)?.setGeoJson(FogBuilder.featureCollection(listOf(
+            FogBuilder.feature(FogBuilder.pointJson(LatLon(p.latitude, p.longitude)), "\"b\":${heading.toInt()}"))))
+    }
+
+    private fun followCamera(target: LatLng, durationMs: Int) {
+        if (follow == Follow.FREE) return
+        val cp = map.cameraPosition
+        val zoom = cp.zoom.let { if (it < 14.5 || it > 19.5) 17.2 else it }
+        // In 3D the puck sits in the lower third so you see more of what lies ahead.
+        val topPad = if (perspectiveOn) context.resources.displayMetrics.heightPixels * 0.35 else 0.0
+        val pos = CameraPosition.Builder().target(target).zoom(zoom).tilt(if (perspectiveOn) 58.0 else 0.0)
+            .bearing(if (follow == Follow.FOLLOW) heading else 0.0)
+            .padding(0.0, topPad, 0.0, 0.0)
+            .build()
+        map.easeCamera(CameraUpdateFactory.newCameraPosition(pos), durationMs)
+    }
+
     fun setFollow(mode: Follow, perspective: Boolean) {
-        val lc = map.locationComponent
-        if (!lc.isLocationComponentActivated || !lc.isLocationComponentEnabled) {
-            android.util.Log.w(TAG, "setFollow($mode) ignored – location component not enabled")
-            return
-        }
         android.util.Log.i(TAG, "camera follow mode $mode, perspective $perspective")
-        val cameraMode = when (mode) {
-            Follow.FOLLOW -> CameraMode.TRACKING_GPS
-            Follow.NORTH -> CameraMode.TRACKING_GPS_NORTH
-            Follow.FREE -> CameraMode.NONE
-        }
-        if (mode == Follow.FREE) { lc.cameraMode = cameraMode; return }
-        // Zoom and tilt are part of the camera transition itself – zoomWhileTracking() would be
-        // ignored while the transition is still running.
-        val zoom = map.cameraPosition.zoom.let { if (it < 15.0 || it > 19.0) 17.2 else it }
-        lc.setCameraMode(cameraMode, 1200L, zoom, null, if (perspective) 58.0 else 0.0, null)
+        follow = mode
+        perspectiveOn = perspective
+        val target = shown ?: lastLoc?.let { LatLng(it.latitude, it.longitude) }
+        if (mode != Follow.FREE && target != null) followCamera(target, 1200)
     }
 
     fun setPerspective(on: Boolean) {
+        perspectiveOn = on
+        if (follow != Follow.FREE && shown != null) { followCamera(shown!!, 700); return }
         val cp = map.cameraPosition
-        map.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(cp).tilt(if (on) 58.0 else 0.0).build()), 700)
+        map.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(cp).tilt(if (on) 58.0 else 0.0)
+            .padding(0.0, 0.0, 0.0, 0.0).build()), 700)
     }
 
     fun moveTo(p: LatLon, zoom: Double, perspective: Boolean, animate: Boolean = true) {
+        perspectiveOn = perspective
         val pos = CameraPosition.Builder().target(LatLng(p.lat, p.lon)).zoom(zoom).tilt(if (perspective) 58.0 else 0.0).build()
         if (animate) map.animateCamera(CameraUpdateFactory.newCameraPosition(pos), 1200)
         else map.cameraPosition = pos
@@ -354,5 +391,6 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         const val L_ROADS = "explored"; const val L_BLDG = "bldg-3d"; const val L_BLDG_NEW = "bldg-3d-new"
         const val L_DISSOLVE = "reveal-dissolve"; const val L_DISSOLVE_CLOUDS = "reveal-dissolve-clouds"; const val L_FLASH = "reveal-flash"
         const val L_FRIENDS = "friends"; const val L_FRIENDS_LABEL = "friends-label"
+        const val IMG_PUCK = "me-arrow"; const val SRC_ME = "me"; const val L_ME = "me-arrow"; const val L_ME_GLOW = "me-glow"
     }
 }

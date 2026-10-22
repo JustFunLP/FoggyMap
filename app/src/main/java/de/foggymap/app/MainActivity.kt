@@ -16,6 +16,7 @@ import androidx.compose.runtime.setValue
 import de.foggymap.app.tracking.TrackingService
 import de.foggymap.app.ui.FoggyRoot
 import de.foggymap.app.ui.FoggyTheme
+import kotlinx.coroutines.launch
 import org.maplibre.android.MapLibre
 import org.maplibre.android.offline.OfflineManager
 
@@ -57,6 +58,10 @@ class MainActivity : ComponentActivity() {
         // Automated emulator test (debug build only): skip onboarding and start exploring.
         if (BuildConfig.DEBUG && intent?.getBooleanExtra("e2e_autostart", false) == true) {
             App.prefs.onboardingDone = true
+            intent.getStringExtra("e2e_server")?.let { server ->
+                App.prefs.nickname = "Emulator"
+                App.scope.launch { App.sync.createGroup("E2E-Test", server) }
+            }
             if (hasFineLocation(this)) TrackingService.start(this)
         }
     }
