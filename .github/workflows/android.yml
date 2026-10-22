@@ -1,0 +1,85 @@
+name: FoggyMap APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      FOGGY_VERSION_CODE: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Restore signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.FOGGY_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/foggy.jks"
+            echo "FOGGY_KEYSTORE_FILE=$RUNNER_TEMP/foggy.jks" >> "$GITHUB_ENV"
+            echo "Stable release key found."
+          else
+            echo "::warning::No FOGGY_KEYSTORE_B64 secret – release APK is signed with a temporary debug key."
+          fi
+
+      - name: Unit tests
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest
+
+      - name: Build APKs
+        env:
+          FOGGY_KEYSTORE_PASSWORD: ${{ secrets.FOGGY_KEYSTORE_PASSWORD }}
+          FOGGY_KEY_ALIAS: ${{ secrets.FOGGY_KEY_ALIAS }}
+          FOGGY_KEY_PASSWORD: ${{ secrets.FOGGY_KEY_PASSWORD }}
+        run: |
+          gradle --no-daemon --stacktrace :app:assembleRelease :app:assembleDebug
+          mkdir -p out
+          cp app/build/outputs/apk/release/app-release.apk out/FoggyMap.apk
+          cp app/build/outputs/apk/debug/app-debug.apk out/FoggyMap-debug.apk
+          "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs out/FoggyMap.apk | head -5 || true
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FoggyMap-apk
+          path: out/*.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-test-report
+          path: app/build/reports/tests/
+          if-no-files-found: ignore
+
+      - name: Publish download link (GitHub Release "FoggyMap neueste Version")
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete apk-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create apk-latest out/FoggyMap.apk \
+            --title "FoggyMap – neueste Version (Build ${{ github.run_number }})" \
+            --notes "Automatisch gebaut aus ${{ github.sha }}. Auf dem Handy FoggyMap.apk antippen und installieren." \
+            --latest

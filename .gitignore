@@ -1,0 +1,12 @@
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+*.keystore
+*.jks
+server/node_modules/
+server/*.db*
+server/rooms.json
+server/cloudflare/node_modules/
+server/cloudflare/.wrangler/
