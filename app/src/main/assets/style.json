@@ -11,12 +11,12 @@
  "glyphs": "https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf",
  "light": {
   "anchor": "viewport",
-  "color": "#ffd9ad",
-  "intensity": 0.38,
+  "color": "#ffe0b8",
+  "intensity": 0.55,
   "position": [
-   1.15,
-   210,
-   35
+   1.3,
+   200,
+   40
   ]
  },
  "layers": [
@@ -156,8 +156,8 @@
    "source-layer": "building",
    "minzoom": 14,
    "paint": {
-    "fill-color": "#15182e",
-    "fill-outline-color": "#22264a"
+    "fill-color": "#1b1f3d",
+    "fill-outline-color": "#2c3160"
    }
   },
   {

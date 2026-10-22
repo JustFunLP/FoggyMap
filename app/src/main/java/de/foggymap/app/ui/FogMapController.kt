@@ -126,11 +126,12 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         add(LineLayer(L_ROADS, SRC_ROADS).withProperties(lineColor("#C9B8FF"), lineOpacity(0.55f),
             lineWidth(interpolate(linear(), zoom(), stop(12, 0.5f), stop(18, 2.2f))), lineCap(Property.LINE_CAP_ROUND)))
         // Revealed buildings in 3D.
+        // Night-city buildings: blue-violet walls that get brighter with height, lit by the warm style light.
         val buildingColor = interpolate(linear(), get("h"),
-            stop(0, color(Color.rgb(30, 33, 66))), stop(12, color(Color.rgb(40, 43, 86))),
-            stop(30, color(Color.rgb(56, 52, 112))), stop(80, color(Color.rgb(78, 66, 150))))
+            stop(0, color(Color.rgb(52, 58, 112))), stop(10, color(Color.rgb(66, 70, 140))),
+            stop(25, color(Color.rgb(88, 84, 172))), stop(60, color(Color.rgb(122, 104, 214))))
         add(FillExtrusionLayer(L_BLDG, SRC_BLDG).withProperties(fillExtrusionColor(buildingColor),
-            fillExtrusionHeight(get("h")), fillExtrusionBase(get("mh")), fillExtrusionOpacity(0.96f),
+            fillExtrusionHeight(get("h")), fillExtrusionBase(get("mh")), fillExtrusionOpacity(0.94f),
             fillExtrusionVerticalGradient(true)).also { it.minZoom = 13.5f })
         add(FillExtrusionLayer(L_BLDG_NEW, SRC_BLDG_NEW).withProperties(fillExtrusionColor(buildingColor),
             fillExtrusionHeight(product(get("h"), literal(0f))), fillExtrusionBase(get("mh")), fillExtrusionOpacity(0.96f),

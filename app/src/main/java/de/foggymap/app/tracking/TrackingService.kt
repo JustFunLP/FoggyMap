@@ -141,7 +141,7 @@ class TrackingService : Service() {
     private fun start() {
         startedAt = SystemClock.elapsedRealtime()
         App.prefs.trackingWanted = true
-        App.tracking.update { TrackingUi(active = true, message = SEARCHING) }
+        App.tracking.update { TrackingUi(active = true) }   // the GPS chip already shows "GPS …"
         scope.launch {
             val known = withContext(Dispatchers.IO) { App.db.roadIds() }
             explorer = Explorer(known)
