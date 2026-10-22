@@ -1,0 +1,14 @@
+# Eigenbetrieb auf einem eigenen Server/VPS mit Domain. Caddy holt automatisch ein HTTPS-Zertifikat.
+#   DOMAIN=foggy.example.de docker compose up -d
+services:
+  sync:
+    build: .
+    restart: unless-stopped
+    volumes: [ "foggydata:/data" ]
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: [ "80:80", "443:443" ]
+    environment: [ "DOMAIN=${DOMAIN}" ]
+    volumes: [ "./Caddyfile:/etc/caddy/Caddyfile:ro", "caddydata:/data" ]
+volumes: { foggydata: {}, caddydata: {} }

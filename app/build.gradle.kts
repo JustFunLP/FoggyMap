@@ -9,6 +9,11 @@ plugins {
 // Release signing comes from environment variables (GitHub Actions secrets) – never from the repository.
 val signingFile = System.getenv("FOGGY_KEYSTORE_FILE")
 
+// Address of the group sync server, written by the "Koop-Server" workflow. Not a secret.
+val defaultServer: String = rootProject.file("server/deployed-server-url.txt").let { f ->
+    if (f.exists()) f.readText().trim().takeIf { Regex("^https://[A-Za-z0-9.-]+(:[0-9]+)?(/[A-Za-z0-9._~/-]*)?$").matches(it) } ?: "" else ""
+}
+
 android {
     namespace = "de.foggymap.app"
     compileSdk = 35
@@ -21,6 +26,7 @@ android {
         versionName = "1.0." + (System.getenv("FOGGY_VERSION_CODE") ?: "0")
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "DEFAULT_SERVER", "\"$defaultServer\"")
     }
 
     signingConfigs {

@@ -1,0 +1,111 @@
+package de.foggymap.app.data
+
+import android.content.Context
+import de.foggymap.app.core.TravelMode
+import java.security.SecureRandom
+
+enum class BatteryMode(val label: String, val description: String) {
+    PRECISE("Präzise", "Häufige GPS-Updates – am genauesten, höchster Verbrauch"),
+    BALANCED("Ausgewogen", "Passt die GPS-Rate an dein Tempo an, pausiert GPS im Stillstand"),
+    SAVER("Sparsam", "Seltenere Updates und gebündelte Lieferung – ideal für lange Touren");
+}
+
+class Prefs(context: Context) {
+    private val p = context.getSharedPreferences("foggymap", Context.MODE_PRIVATE)
+
+    var onboardingDone: Boolean
+        get() = p.getBoolean("onboarding_done", false)
+        set(v) = p.edit().putBoolean("onboarding_done", v).apply()
+
+    /** The user wants tracking to run (survives app restarts; the service restores it). */
+    var trackingWanted: Boolean
+        get() = p.getBoolean("tracking_wanted", false)
+        set(v) = p.edit().putBoolean("tracking_wanted", v).apply()
+
+    var batteryMode: BatteryMode
+        get() = runCatching { BatteryMode.valueOf(p.getString("battery_mode", null) ?: "") }.getOrDefault(BatteryMode.BALANCED)
+        set(v) = p.edit().putString("battery_mode", v.name).apply()
+
+    var buildings3d: Boolean
+        get() = p.getBoolean("buildings_3d", true)
+        set(v) = p.edit().putBoolean("buildings_3d", v).apply()
+
+    var fogAnimation: Boolean
+        get() = p.getBoolean("fog_animation", true)
+        set(v) = p.edit().putBoolean("fog_animation", v).apply()
+
+    var perspective: Boolean
+        get() = p.getBoolean("perspective", true)
+        set(v) = p.edit().putBoolean("perspective", v).apply()
+
+    // ------------------------------------------------------------ coop
+
+    var server: String
+        get() = p.getString("server", "") ?: ""
+        set(v) = p.edit().putString("server", v.trim().trimEnd('/')).apply()
+
+    var groupCode: String
+        get() = p.getString("group", "") ?: ""
+        set(v) = p.edit().putString("group", v).apply()
+
+    var groupName: String
+        get() = p.getString("group_name", "") ?: ""
+        set(v) = p.edit().putString("group_name", v).apply()
+
+    var syncRevision: Long
+        get() = p.getLong("sync_revision", 0)
+        set(v) = p.edit().putLong("sync_revision", v).apply()
+
+    var lastSyncMs: Long
+        get() = p.getLong("last_sync", 0)
+        set(v) = p.edit().putLong("last_sync", v).apply()
+
+    var shareLiveLocation: Boolean
+        get() = p.getBoolean("share_live", false)
+        set(v) = p.edit().putBoolean("share_live", v).apply()
+
+    val memberId: String
+        get() = p.getString("member_id", null) ?: randomHex(16).also { p.edit().putString("member_id", it).apply() }
+
+    /** Public, hashed member key the server derived from [memberId] (identifies "me" in member lists). */
+    var memberKey: String
+        get() = p.getString("member_key", "") ?: ""
+        set(v) = p.edit().putString("member_key", v).apply()
+
+    var nickname: String
+        get() = p.getString("nickname", null) ?: "Entdecker ${memberId.take(4).uppercase()}"
+        set(v) = p.edit().putString("nickname", v.trim().take(24)).apply()
+
+    // ------------------------------------------------------------ statistics
+
+    fun distance(mode: TravelMode): Double = p.getFloat("dist_${mode.name}", 0f).toDouble()
+    fun addDistances(byMode: Map<TravelMode, Double>) {
+        val e = p.edit()
+        byMode.forEach { (m, d) -> e.putFloat("dist_${m.name}", (distance(m) + d).toFloat()) }
+        e.apply()
+    }
+
+    var trackedSeconds: Long
+        get() = p.getLong("tracked_seconds", 0)
+        set(v) = p.edit().putLong("tracked_seconds", v).apply()
+
+    var lastLat: Double
+        get() = p.getFloat("last_lat", Float.NaN).toDouble()
+        set(v) = p.edit().putFloat("last_lat", v.toFloat()).apply()
+    var lastLon: Double
+        get() = p.getFloat("last_lon", Float.NaN).toDouble()
+        set(v) = p.edit().putFloat("last_lon", v.toFloat()).apply()
+
+    fun resetStatistics() {
+        val e = p.edit()
+        TravelMode.entries.forEach { e.remove("dist_${it.name}") }
+        e.remove("tracked_seconds").remove("sync_revision").apply()
+    }
+
+    companion object {
+        fun randomHex(bytes: Int): String {
+            val b = ByteArray(bytes).also { SecureRandom().nextBytes(it) }
+            return b.joinToString("") { "%02x".format(it) }
+        }
+    }
+}

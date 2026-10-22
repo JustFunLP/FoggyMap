@@ -1,0 +1,13 @@
+{
+  // FoggyMap sync on Cloudflare Workers (free plan). Deploy: see ../../ANLEITUNG_SERVER.md
+  "name": "foggymap-sync",
+  "main": "worker.js",
+  "compatibility_date": "2025-09-01",
+  "workers_dev": true,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "foggymap"
+    }
+  ]
+}

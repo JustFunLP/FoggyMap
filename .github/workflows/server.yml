@@ -1,0 +1,93 @@
+name: Koop-Server (Cloudflare) einrichten
+
+# Einmalig manuell starten (Actions → "Koop-Server (Cloudflare) einrichten" → Run workflow).
+# Benötigt die Repository-Secrets CLOUDFLARE_API_TOKEN und CLOUDFLARE_ACCOUNT_ID (siehe ANLEITUNG.md).
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Secrets vorhanden?
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::Es fehlen die Secrets CLOUDFLARE_API_TOKEN und/oder CLOUDFLARE_ACCOUNT_ID (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+
+      - name: Server-Tests
+        working-directory: server
+        run: npm test
+
+      - name: Wrangler installieren
+        working-directory: server/cloudflare
+        run: npm ci --no-audit --no-fund
+
+      - name: D1-Datenbank anlegen bzw. finden
+        working-directory: server/cloudflare
+        run: |
+          set -e
+          ID=$(npx wrangler d1 list --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const db=JSON.parse(s).find(d=>d.name==="foggymap");console.log(db?db.uuid:"")})')
+          if [ -z "$ID" ]; then
+            npx wrangler d1 create foggymap
+            ID=$(npx wrangler d1 list --json | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{console.log(JSON.parse(s).find(d=>d.name==="foggymap").uuid)})')
+          fi
+          echo "D1 database id: $ID"
+          node -e '
+            const fs=require("fs");const f="wrangler.jsonc";
+            let t=fs.readFileSync(f,"utf8").replace(/"database_name": "foggymap"/, `"database_name": "foggymap",\n      "database_id": "${process.argv[1]}"`);
+            fs.writeFileSync(f,t);' "$ID"
+          grep -n database wrangler.jsonc
+
+      - name: Worker veröffentlichen
+        id: deploy
+        working-directory: server/cloudflare
+        run: |
+          set -o pipefail
+          npx wrangler deploy 2>&1 | tee deploy.log
+          URL=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' deploy.log | head -1)
+          if [ -z "$URL" ]; then
+            echo "::error::Keine workers.dev-Adresse gefunden. Öffne im Cloudflare-Dashboard einmal 'Workers & Pages', damit eine workers.dev-Subdomain angelegt wird, und starte den Workflow erneut."
+            exit 1
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Server testen
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS "${{ steps.deploy.outputs.url }}/health"; then echo; exit 0; fi
+            sleep 10
+          done
+          echo "::error::Der Server antwortet (noch) nicht."; exit 1
+
+      - name: Adresse in die App eintragen und neue APK bauen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "${{ steps.deploy.outputs.url }}" > server/deployed-server-url.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add server/deployed-server-url.txt
+          if git commit -m "Koop-Server-Adresse: ${{ steps.deploy.outputs.url }}"; then git push; fi
+          gh workflow run android.yml --ref main
+          {
+            echo "## ✅ Koop-Server läuft"
+            echo ""
+            echo "Adresse: **${{ steps.deploy.outputs.url }}**"
+            echo ""
+            echo "Die Adresse wird automatisch in die App eingebaut. Eine neue FoggyMap.apk wird gerade gebaut (Actions → FoggyMap APK)."
+          } >> "$GITHUB_STEP_SUMMARY"

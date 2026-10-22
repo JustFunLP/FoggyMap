@@ -1,1 +1,12 @@
-{"name":"foggymap-sync","version":"0.2.0","private":true,"type":"module","scripts":{"start":"node index.js","test":"node --test"},"engines":{"node":">=20"}}
+{
+  "name": "foggymap-sync",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "FoggyMap group sync server (Cloudflare Worker + D1, or Node.js with SQLite)",
+  "scripts": {
+    "start": "node src/node-server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=22.13" }
+}
