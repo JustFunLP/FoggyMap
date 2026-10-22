@@ -113,6 +113,8 @@ if native:
 live = [l for l in log if "FoggyMap" in l and ("cache=false" in l or "failed:" in l)]
 summary.append("Live-Download Overpass: " + ("; ".join(l.split("FoggyMap: ")[-1] for l in live[:3]) if live else "nicht nötig/keiner"))
 summary.append(f"App-Absturz im Log: {'JA' if crash else 'nein'}")
+fog_updates = sum(1 for l in log if "fog updated" in l)
+summary.append(f"Nebel-Aktualisierungen der Karte: {fog_updates}")
 counts = {}
 if os.path.getsize(db) > 0:
     con = sqlite3.connect(db)

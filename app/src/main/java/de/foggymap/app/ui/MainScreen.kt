@@ -155,7 +155,10 @@ fun MainScreen(activity: MainActivity) {
         c.requestRefresh(start)
     }
     LaunchedEffect(controller, dbVersion) { controller?.requestRefresh(location?.let { LatLon(it.latitude, it.longitude) }) }
-    DisposableEffect(controller) { onDispose { controller?.dispose() } }
+    // Capture the instance: reading the state inside onDispose would return the *new* controller
+    // and shut down the fog updates right after the map became ready.
+    val currentController = controller
+    DisposableEffect(currentController) { onDispose { currentController?.dispose() } }
     if (de.foggymap.app.BuildConfig.DEBUG) LaunchedEffect(controller) {
         while (true) { kotlinx.coroutines.delay(10_000); controller?.let { android.util.Log.i("FoggyMap", "ui: " + it.debugState()) } }
     }
@@ -166,16 +169,17 @@ fun MainScreen(activity: MainActivity) {
     }
     LaunchedEffect(controller, syncUi.members) { controller?.showFriends(syncUi.members) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    DisposableEffect(lifecycle, controller) {
+    DisposableEffect(lifecycle, currentController) {
+        val c = currentController
         val obs = LifecycleEventObserver { _, e ->
             when (e) {
-                Lifecycle.Event.ON_RESUME -> { controller?.startAmbient(); App.sync.requestSync(1_000) }
-                Lifecycle.Event.ON_PAUSE -> controller?.stopAmbient()
+                Lifecycle.Event.ON_RESUME -> { c?.startAmbient(); App.sync.requestSync(1_000) }
+                Lifecycle.Event.ON_PAUSE -> c?.stopAmbient()
                 else -> {}
             }
         }
-        lifecycle.addObserver(obs)
-        onDispose { lifecycle.removeObserver(obs); controller?.stopAmbient() }
+        lifecycle.addObserver(obs)   // replays ON_RESUME if we are already resumed
+        onDispose { lifecycle.removeObserver(obs); c?.stopAmbient() }
     }
 
     val density = LocalDensity.current
