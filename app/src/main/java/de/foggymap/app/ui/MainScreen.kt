@@ -288,7 +288,7 @@ private fun StatusPill(t: de.foggymap.app.TrackingUi) {
         if (t.active) add(if (acc == null) "Suche GPS …" else "GPS ±${acc.toInt()} m")
         if (t.active && acc != null) add(modeLabel(t.mode))
         if (t.powerProfile.isNotEmpty() && t.active) add(t.powerProfile)
-        if (t.loadingMap) add("Lade Straßendaten …")
+        if (t.loadingMap) add("lade Straßen …")
     }.joinToString(" · ")
     Column(Modifier.padding(top = 8.dp)) {
         Row(Modifier.clip(RoundedCornerShape(14.dp)).background(Fog.Surface.copy(alpha = 0.88f)).padding(horizontal = 12.dp, vertical = 7.dp),

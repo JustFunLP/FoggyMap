@@ -48,9 +48,10 @@ fun FogMapView(modifier: Modifier, topInsetPx: Int, onReady: (FogMapController) 
                 isCompassEnabled = false
                 isLogoEnabled = false
                 isAttributionEnabled = true
-                attributionGravity = Gravity.TOP or Gravity.START
+                // Left edge, vertically centred: never covered by the status line or the bottom card.
+                attributionGravity = Gravity.START or Gravity.CENTER_VERTICAL
                 val m = (12 * density.density).toInt()
-                setAttributionMargins(m, topInsetPx, m, m)
+                setAttributionMargins(m, 0, m, 0)
                 isTiltGesturesEnabled = true
                 isRotateGesturesEnabled = true
             }

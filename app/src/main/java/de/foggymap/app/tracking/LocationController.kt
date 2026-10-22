@@ -34,7 +34,7 @@ import de.foggymap.app.data.BatteryMode
  *    because every fix carries its own timestamp.
  */
 class LocationController(private val context: Context, private val onLocations: (List<Location>) -> Unit) {
-    enum class Profile(val label: String) { FAST("Fahrt"), MOVING("Unterwegs"), STILL("GPS pausiert (Stillstand)") }
+    enum class Profile(val label: String) { FAST("GPS aktiv"), MOVING("GPS aktiv"), STILL("GPS-Pause (Stillstand)") }
 
     private val lm = context.getSystemService(LocationManager::class.java)
     private val sensors = context.getSystemService(SensorManager::class.java)
