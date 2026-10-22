@@ -12,7 +12,7 @@ Stand: 22.10.2026. Alle Ergebnisse stammen aus echten Läufen, die du jederzeit 
 
 ## ✅ Automatisch getestet
 
-**1. Kernlogik (36 Unit-Tests, laufen bei jedem Build)**
+**1. Kernlogik (37 Unit-Tests, laufen bei jedem Build)**
 - Straßenaufteilung: Teilung an Kreuzungen, Fußwege teilen keine Straßen, Brücken bilden keine Kreuzung, Gehwege und Zufahrten werden ignoriert, lange Landstraßen werden gestückelt, die IDs sind kachelübergreifend stabil.
 - Blockzuordnung: Ein Abschnitt deckt genau die 2 angrenzenden Blöcke auf, nicht den Block hinter der Parallelstraße und nicht die Kreuzungsfortsetzung. Riesenblöcke (24 ha) werden nur als Streifen aufgedeckt. Ein Fußweg im Park deckt nur einen Streifen auf. Bahnlinien begrenzen Blöcke. In Dörfern ohne Blöcke werden nur Häuser ohne dazwischenliegende Straße aufgedeckt.
 - GPS-Jitter: 15 Zufallsläufe mit 0 Fehlaufdeckungen beim Stehen an einer Kreuzung (±7 m Streuung, 2,5 min), 0 Fehlaufdeckungen einer nur 20 m entfernten Parallelstraße und 0 verpasste Straßen. Ungenaue Positionen (±60 m) und GPS-Sprünge werden verworfen. Geräte, die Geschwindigkeit 0 melden, werden korrekt behandelt. Bei der Autofahrt mit nur alle 42 m einer Position werden die 35 m kurzen Abschnitte erkannt, ohne Seitenstraßen.
@@ -27,7 +27,9 @@ Zusätzlich lief der Worker lokal in der echten Cloudflare-Laufzeit (`wrangler d
 
 **3. Ende-zu-Ende im Android-Emulator (Android 14, bei jedem Build)**
 Die APK wird installiert. Eine simulierte 1,1-km-GPS-Fahrt (6 m/s) führt über echte Helsinki-Straßen. Danach prüft der Test die Datenbank in der App, die Datenbank des Koop-Servers, Screenshots und Logs.
-ERGEBNIS_E2E
+Letzter vollständiger Lauf: **kein Absturz der App**. Aufgedeckt wurden 10 Straßenabschnitte, 10 Häuserblöcke, 2 Teilflächen und 20 Gebäude. **42 von 42 Funden kamen auf dem Koop-Server an.** Die App hat dabei selbst eine Gruppe erstellt. Nachbarkacheln wurden live über Overpass geladen.
+Die App hat im Vordergrund, im Hintergrund und bei ausgeschaltetem Bildschirm aufgezeichnet. Dabei zeigte sich, dass das gebündelte GPS-Liefern bei ausgeschaltetem Bildschirm auf dem Emulator nichts liefert. Die App erkennt das inzwischen und schaltet automatisch um.
+Beim Wiedereinschalten des Bildschirms stürzte einmal der **OpenGL-Übersetzer des Emulators** ab (`libGLESv2_enc.so`, Software-Grafik ohne GPU). Das betrifft den Emulator. Ob echte Geräte betroffen sind, kann ich ohne Gerät nicht sicher sagen.
 
 ## ⚠️ Nicht getestet (konnte ich ohne echtes Handy nicht prüfen)
 
