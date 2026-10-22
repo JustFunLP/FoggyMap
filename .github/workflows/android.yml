@@ -76,16 +76,28 @@ jobs:
           { echo "FOGGY_KEYSTORE_FILE=$K"; echo "FOGGY_KEYSTORE_PASSWORD=$PW"; echo "FOGGY_KEY_PASSWORD=$PW"; echo "FOGGY_KEY_ALIAS=foggymap"; } >> "$GITHUB_ENV"
 
       - name: Unit tests
-        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:testDebugUnitTest 2>&1 | tee -a build.log
 
       - name: Build APKs
         run: |
-          gradle --no-daemon --stacktrace :app:assembleRelease :app:assembleDebug
+          set -o pipefail
+          gradle --no-daemon :app:assembleRelease :app:assembleDebug 2>&1 | tee -a build.log
           mkdir -p out
           cp app/build/outputs/apk/release/app-release.apk out/FoggyMap.apk
           cp app/build/outputs/apk/debug/app-debug.apk out/FoggyMap-debug.apk
           "$ANDROID_HOME"/build-tools/*/apksigner verify --print-certs out/FoggyMap.apk | head -5 || true
           ls -la out
+
+      - name: Report build errors
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          grep -E "^e: |error:|FAILED|What went wrong|> " build.log | head -40 | while IFS= read -r line; do echo "::error::$line"; done || true
+          gh release view ci-log >/dev/null 2>&1 || gh release create ci-log --draft --title "CI-Protokoll (intern)" --notes "Letztes fehlgeschlagenes Build-Protokoll"
+          gh release upload ci-log build.log --clobber || true
 
       - uses: actions/upload-artifact@v4
         with:
