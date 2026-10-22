@@ -26,6 +26,7 @@ adb shell settings put global anr_show_background 0 || true
 adb install -r -g out/FoggyMap-debug.apk
 adb shell pm grant $PKG android.permission.ACCESS_FINE_LOCATION || true
 adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS || true
+adb logcat -G 16M || true
 adb logcat -c
 
 # Pre-seed the two route cells with a real OSM extract (Helsinki, ODbL) so the test does not depend on
@@ -51,29 +52,33 @@ done
 sleep 5
 shot 01-start
 
-# Drive the route: one GPS fix per second (≈ 6 m/s).
-# (adb must not read the loop's stdin – otherwise it swallows the remaining route lines.)
+# Drive the route like a real trip: the app is put into the background for the first half and the
+# screen is switched off for the second half (phone in the pocket). Only the foreground service runs.
+# (This also keeps the software-rendered CI emulator responsive.)
+adb shell input keyevent KEYCODE_HOME
+sleep 3
+TOTAL=$(wc -l < scripts/e2e_route.txt)
 n=0
 while read -r LON LAT <&3; do
   adb emu geo fix "$LON" "$LAT" > /dev/null < /dev/null
   n=$((n+1))
-  if [ $n -eq 80 ]; then shot 02-unterwegs < /dev/null; fi
+  if [ $n -eq $((TOTAL/2)) ]; then adb shell input keyevent KEYCODE_SLEEP < /dev/null; echo "screen off after $n points"; fi
   sleep 1
 done 3< scripts/e2e_route.txt
 echo "drove $n route points"
-# Stay at the destination. If the second map cell could not be loaded during the drive (public
-# Overpass servers are often overloaded), the queued positions are replayed once it arrives.
-for i in $(seq 1 120); do
-  adb emu geo fix "$LON" "$LAT" > /dev/null
-  if [ $i -ge 20 ] && [ "$(adb logcat -d -s FoggyMap:I | grep -c 'cell loaded')" -ge 2 ]; then break; fi
-  sleep 2
-done
-sleep 10
+# Stay at the destination until all queued positions could be processed.
+for i in $(seq 1 45); do adb emu geo fix "$LON" "$LAT" > /dev/null; sleep 2; done
+
+adb shell input keyevent KEYCODE_WAKEUP
+sleep 2
+adb shell wm dismiss-keyguard || adb shell input keyevent 82
+adb shell am start -n $PKG/de.foggymap.app.MainActivity > /dev/null
+sleep 25
 shot 03-ziel
-# Zoomed-out overview of the whole route: switch off follow mode by panning slightly, then pinch-free zoom via double-tap-drag is
-# not available in adb – instead toggle 2D and take another shot.
-adb shell input tap $((1080*90/100)) $((2400*435/1000)); sleep 4; shot 03b-2d
-adb shell input tap $((1080*90/100)) $((2400*435/1000)); sleep 2
+# 2D overview (layers button toggles the perspective)
+SIZE=$(adb shell wm size | grep -oE '[0-9]+x[0-9]+' | tail -1); W=${SIZE%x*}; H=${SIZE#*x}
+adb shell input tap $((W*90/100)) $((H*435/1000)); sleep 8; shot 03b-2d
+adb shell input tap $((W*90/100)) $((H*435/1000)); sleep 3
 
 # Statistics sheet: tap the bottom card (screen-size independent: 80 % height, centre).
 SIZE=$(adb shell wm size | grep -oE '[0-9]+x[0-9]+' | tail -1); W=${SIZE%x*}; H=${SIZE#*x}
