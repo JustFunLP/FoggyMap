@@ -14,7 +14,7 @@ Stand: 23.10.2026. Alle Ergebnisse stammen aus echten Läufen, die du jederzeit 
 
 ## ✅ Automatisch getestet
 
-**1. Kernlogik (72 Unit-Tests, laufen bei jedem Build)**
+**1. Kernlogik (78 Unit-Tests, laufen bei jedem Build)**
 - Straßenaufteilung: Teilung an Kreuzungen, Fußwege teilen keine Straßen, Brücken bilden keine Kreuzung, Gehwege und Zufahrten werden ignoriert, lange Landstraßen werden gestückelt, die IDs sind kachelübergreifend stabil.
 - **Straßennetz aus Vektorkacheln (neu, ersetzt Overpass):** Mit künstlich erzeugten Kacheln (Schnitt an Kachelrändern, weggekürzte Kreuzungspunkte) und mit **echten OpenFreeMap-Kacheln** aus Odenthal (Dorf) und Berlin-Prenzlauer Berg, verglichen mit den Overpass-Daten derselben Gegend vom selben Tag:
   - 62 von 62 bzw. 65 von 65 echten Kreuzungen gefunden, keine Straße fehlt.
@@ -27,6 +27,8 @@ Stand: 23.10.2026. Alle Ergebnisse stammen aus echten Läufen, die du jederzeit 
 - Blockzuordnung: Ein Abschnitt deckt genau die 2 angrenzenden Blöcke auf, nicht den Block hinter der Parallelstraße und nicht die Kreuzungsfortsetzung. Riesenblöcke (24 ha) werden nur als Streifen aufgedeckt. Ein Fußweg im Park deckt nur einen Streifen auf. Bahnlinien begrenzen Blöcke. In Dörfern ohne Blöcke werden nur Häuser ohne dazwischenliegende Straße aufgedeckt.
 - GPS-Jitter: 15 Zufallsläufe mit 0 Fehlaufdeckungen beim Stehen an einer Kreuzung (±7 m Streuung, 2,5 min), 0 Fehlaufdeckungen einer nur 20 m entfernten Parallelstraße und 0 verpasste Straßen. Ungenaue Positionen (±60 m) und GPS-Sprünge werden verworfen. Bei Autotempo zählen Fuß- und Radwege nicht.
 - Offline-Erkundung: Fortschritt übersteht den Neustart ohne Duplikate.
+- Ruhigere Positionsanzeige (neu): Im Stehen mit ±6 m GPS-Streuung liegt die angezeigte Position im Schnitt 3,3 m statt 7,2 m daneben. Ein ungenauer WLAN-Fix zieht die Figur nicht weg, und in Bewegung folgt sie sofort.
+- Abzeichen (neu): Nur Vergaben mit der Signatur des Admin-Schlüssels zählen. „Alle bis Zeitpunkt T“ gilt nur für frühere Installationen. Spieler-ID und Gruppenmitglied werden erkannt. Zurücknehmen und erneutes Vergeben funktionieren. Die Ableitung des Admin-Schlüssels ist mit einem Testcode geprüft, der echte Code steht nicht im Repository.
 - Gemerkte Orte fürs GPS (neu): Ein Ort gilt nach zweimal Stillstehen als bekannt, GPS-Streuung von 25 m zählt als derselbe Ort, 150 m daneben nicht. Höchstens 40 Orte, die ältesten fallen zuerst weg.
 - Zusammenführung zweier Nutzer: Vereinigung ohne Verlust und ohne Duplikate, unabhängig von der Reihenfolge, Wiederholungen sind folgenlos.
 - **Koop ohne Server (neu):** Die Signaturen (BIP-340) bestehen alle 19 offiziellen Testvektoren. Ereignisse werden exakt nach NIP-01 serialisiert, signiert und geprüft, eine veränderte Nachricht fällt durch. Nur wer den Gruppencode kennt, kann die Daten lesen: Mit einem anderen Code oder bei manipulierten Daten kommt nichts heraus. Auch über 1.000 Funde passen in Pakete unter 60 KB, und neue Funde ändern nur das letzte Paket.
@@ -53,7 +55,13 @@ Der Build-Test spricht mit den echten Relays im Internet, nicht mit einer Attrap
 - **Relay-Prüfung:** 12 öffentliche Relays wurden getestet, ob sie 25-KB- und 50-KB-Pakete annehmen und wieder herausgeben. 7 schafften beides. Die App nutzt fünf davon: nos.lol, relay.primal.net, nostr.mom, relay.snort.social und nostr-pub.wellorder.net. Aussortiert: Relays, die nur „Web-of-Trust“-Nutzer annehmen, nicht erreichbare und eines, das Daten zwar annimmt, aber nicht zurückgibt.
 - **Zwei Mitglieder, echte Relays:** Anna erstellt eine Gruppe und veröffentlicht 540 Funde in 3 Paketen. Ben findet die Gruppe „CI-Gruppe“ nur über den Code und erhält alle 540. Anna erhält Bens 30 Funde. Beide sehen sich als Mitglieder, Bens eingeschalteter Live-Standort ist bei Anna sichtbar. Eine zweite Runde ohne neue Funde sendet nichts. Dauer: 11–12 s (zwei Läufe am 23.10.2026). Im zweiten Lauf antworteten bei der letzten Abfrage nur 3 der 5 Relays rechtzeitig (der Test stellt viele Abfragen in wenigen Sekunden). Die Daten kamen trotzdem vollständig an. Genau dafür schreibt die App an fünf Relays, und ein Paket gilt erst als verschickt, wenn mindestens zwei es gespeichert haben.
 
-**7. Aussehen der 3D-Karte (Vorschau)**
+- **Live alle 2–3 Sekunden (neu):** Jedes der 5 Relays leitet die flüchtigen Live-Nachrichten weiter (3 von 3 angekommen), die erste nach 70–560 ms. Über alle Relays zusammen kamen 4 von 4 an, Funde reisen mit.
+
+**7. Fenster und Figuren**
+- Fensterflackern beim Drehen: im Browser mit echten Berliner Kacheln gemessen (Bild-zu-Bild-Unterschied beim Drehen in 0,35°-Schritten, Pixeldichte wie ein Handy). Altes Muster 9,0, neues Muster 6,7, also etwa ein Viertel weniger Flackern. Dazu überlappen Dach und Fassade nicht mehr (dort konnte es flimmern). Auf einem echten Handy nicht geprüft.
+- Mini-Figuren und Abzeichen-Einblendung werden bei jedem Build gerendert (alle 72 Figurenbilder als Bogen, Abzeichen-Moment als Bild). Die Animation selbst (Drehen, Konfetti, Vibrieren) läuft nur auf dem Gerät und ist dort nicht geprüft.
+
+**8. Aussehen der 3D-Karte (Vorschau)**
 Die neuen 3D-Gebäude (Fassaden mit beleuchteten Fenstern, dunkle Dächer, mindestens ca. 8 m hoch) wurden mit denselben Berliner Kacheln, demselben Kartenstil und denselben Nebel- und Gebäudedaten in MapLibre GL JS (Browser) gerendert und begutachtet. Auf dem Handy rendert MapLibre Native. Das sollte gleich aussehen, ist aber nicht auf einem echten Gerät geprüft.
 
 ## ⚠️ Nicht getestet (konnte ich ohne echtes Handy nicht prüfen)
@@ -68,6 +76,9 @@ Die neuen 3D-Gebäude (Fassaden mit beleuchteten Fenstern, dunkle Dächer, minde
 - **Wie lange die Relays Daten aufbewahren.** Öffentliche Relays geben keine Garantie. Deshalb schreibt die App an fünf gleichzeitig, und jedes Handy behält alle Funde (eigene und die der Gruppe) lokal. Fallen alle Relays aus oder löschen sie, gehen für neue Mitglieder ältere Funde verloren, nicht aber für bestehende.
 - **Datenverbrauch des Koop-Modus** im Alltag. Rechnerisch: pro Sync meist ein Paket von ca. 13 KB an fünf Relays plus das Abholen neuer Pakete.
 - **Eigener Koop-Server mit deinem Cloudflare-Konto** (optional). Workflow und Worker sind getestet, die Einrichtung mit deinem Konto nicht.
+- **Live-Koop, Figuren und Abzeichen auf echten Handys** (Akku bei Live alle 2–3 s, wie flüssig die Figuren laufen, die Abzeichen-Einblendung).
+- **Update-Benachrichtigung im Hintergrund:** Sie läuft über Android-WorkManager alle 3 Stunden. Ob und wann ein Hersteller das verzögert, ist nicht geprüft.
+- **GPS-Genauigkeit draußen:** Der Fused-Anbieter und die sofortige Positionsabfrage sind eingebaut, aber nicht im Freien gemessen.
 - Andere Android-Versionen als 14 (Mindestversion 8.0) und schwache Geräte.
 - Die Darstellung der Hintergrundkarte (OpenFreeMap-Kacheln) im Emulator: Die Software-Grafik im CI ist sehr langsam.
 
