@@ -88,7 +88,8 @@ fun MenuSheet(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> Unit, in
 internal fun MenuContent(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> Unit, initialTab: MenuTab,
                          onChanged: () -> Unit, onDataCleared: () -> Unit) {
     var tab by remember { mutableStateOf(initialTab) }
-    Column {
+    // All texts light on the dark menu, no matter which container hosts it.
+    androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides Fog.Text) { Column {
         Row(verticalAlignment = Alignment.CenterVertically) {
             LogoTitle(22)
             Spacer(Modifier.weight(1f))
@@ -102,7 +103,7 @@ internal fun MenuContent(sync: SyncUi, pendingInvite: String?, onInviteUsed: () 
             MenuTab.COOP -> CoopTab(sync, pendingInvite, onInviteUsed)
             MenuTab.APP -> AppTab(onDataCleared)
         }
-    }
+    } }
 }
 
 @Composable

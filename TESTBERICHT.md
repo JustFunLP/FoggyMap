@@ -14,7 +14,7 @@ Stand: 23.10.2026. Alle Ergebnisse stammen aus echten Läufen, die du jederzeit 
 
 ## ✅ Automatisch getestet
 
-**1. Kernlogik (58 Unit-Tests, laufen bei jedem Build)**
+**1. Kernlogik (63 Unit-Tests, laufen bei jedem Build)**
 - Straßenaufteilung: Teilung an Kreuzungen, Fußwege teilen keine Straßen, Brücken bilden keine Kreuzung, Gehwege und Zufahrten werden ignoriert, lange Landstraßen werden gestückelt, die IDs sind kachelübergreifend stabil.
 - **Straßennetz aus Vektorkacheln (neu, ersetzt Overpass):** Mit künstlich erzeugten Kacheln (Schnitt an Kachelrändern, weggekürzte Kreuzungspunkte) und mit **echten OpenFreeMap-Kacheln** aus Odenthal (Dorf) und Berlin-Prenzlauer Berg, verglichen mit den Overpass-Daten derselben Gegend vom selben Tag:
   - 62 von 62 bzw. 65 von 65 echten Kreuzungen gefunden, keine Straße fehlt.
@@ -40,7 +40,13 @@ Lauf vom 23.10.2026 mit Vektorkacheln, **ohne vorab geladene Daten**: Die Kachel
 Die erste Kartenzelle war im Emulator nach 35 s fertig (ab App-Start). Der Zellaufbau selbst dauerte dort 13,6 s, am PC 0,15 s. Der CI-Emulator ist sehr langsam (Debug-Build, keine Grafikkarte). Inzwischen startet der Stadt-Download erst nach der ersten Zelle, die Zelle ist kleiner, und sie wird schon beim Öffnen der App vorbereitet.
 Die Karte selbst lässt sich im GitHub-Emulator nicht anzeigen: Ohne Grafikkarte stürzt der OpenGL-Übersetzer des Emulators ab (`libGLESv2_enc.so`), die Screenshots zeigen deshalb den Startbildschirm. Ob echte Geräte betroffen sind, kann ich ohne Gerät nicht sicher sagen. Auf deinem Handy lief die Karte bisher.
 
-**4. Aussehen der 3D-Karte (Vorschau)**
+**4. Oberfläche (Screenshots ohne Gerät)**
+Menü (Erkunden, Koop mit und ohne Gruppe, App) und die Kartenansicht (Kopfzeile, Standort-Knopf, Statistik-Karte) werden bei jedem Build mit Robolectric gerendert und als Bilder abgelegt. Geprüft am 23.10.2026: Texte, Schalter, Skizzen der Aufdeck-Modi.
+
+**5. Aufdeck-Modi (Unit-Tests)**
+Häuserblöcke, Straßenzug (einstellbare Breite, endet an der nächsten Straße) und Umkreis (Radius um den GPS-Weg, ohne Kartendaten, im Stillstand kaum neue Flächen). Eine Straße mit Block auf einer Seite und offenem Land auf der anderen zeigt beide Seiten. Sehr große Blöcke zeigen nur die Häuser an der Straße.
+
+**6. Aussehen der 3D-Karte (Vorschau)**
 Die neuen 3D-Gebäude (Fassaden mit beleuchteten Fenstern, dunkle Dächer, mindestens ca. 8 m hoch) wurden mit denselben Berliner Kacheln, demselben Kartenstil und denselben Nebel- und Gebäudedaten in MapLibre GL JS (Browser) gerendert und begutachtet. Auf dem Handy rendert MapLibre Native. Das sollte gleich aussehen, ist aber nicht auf einem echten Gerät geprüft.
 
 ## ⚠️ Nicht getestet (konnte ich ohne echtes Handy nicht prüfen)
