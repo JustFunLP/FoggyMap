@@ -25,8 +25,8 @@ import de.foggymap.app.BuildConfig
 import de.foggymap.app.MainActivity
 import de.foggymap.app.R
 import de.foggymap.app.TrackingUi
+import de.foggymap.app.core.BuildingFootprint
 import de.foggymap.app.core.BuildingRevealer
-import de.foggymap.app.core.BuildingTileKey
 import de.foggymap.app.core.CellKey
 import de.foggymap.app.core.RevealKind
 import de.foggymap.app.core.Explorer
@@ -34,7 +34,7 @@ import de.foggymap.app.core.Fix
 import de.foggymap.app.core.Geo
 import de.foggymap.app.core.LatLon
 import de.foggymap.app.core.TravelMode
-import de.foggymap.app.data.OsmRepository
+import de.foggymap.app.data.TileRepository
 import de.foggymap.app.data.RevealDatabase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -68,12 +68,10 @@ class TrackingService : Service() {
 
     private val loading = HashSet<CellKey>()
     private var lastHeading: Double? = null
-
-    // Building tiles are fetched lazily for revealed areas only.
-    private val buildingTilesLoading = HashSet<BuildingTileKey>()
-    private val buildingFailures = HashMap<BuildingTileKey, Pair<Int, Long>>()
-    private val pendingBuildingTiles = LinkedHashSet<BuildingTileKey>()
     private val failures = HashMap<CellKey, Pair<Int, Long>>()   // attempts, retry-at (elapsed ms)
+    /** Building footprints of the loaded cells (same tiles as the streets, no extra download). */
+    private val cellBuildings = HashMap<CellKey, kotlinx.coroutines.Deferred<List<BuildingFootprint>>>()
+    private var areaRequested = false
 
     // Battery profile state
     private var stillAnchor: LatLon? = null
@@ -142,12 +140,14 @@ class TrackingService : Service() {
         startedAt = SystemClock.elapsedRealtime()
         App.prefs.trackingWanted = true
         App.tracking.update { TrackingUi(active = true) }   // the GPS chip already shows "GPS …"
+        App.trail.value = emptyList()
         scope.launch {
             val known = withContext(Dispatchers.IO) { App.db.roadIds() }
             explorer = Explorer(known)
             if (BuildConfig.DEBUG) explorer?.matcher?.debug = { android.util.Log.d("FoggyMatcher", it) }
             restoreQueue()
             locations.lastKnown()?.let { last -> prefetch(LatLon(last.latitude, last.longitude)) }
+            queue.peekLast()?.let { publishTrail(it.pos, force = true) }
         }
         locations.apply(LocationController.Profile.MOVING)
         lastGoodFixAt = SystemClock.elapsedRealtime()
@@ -170,6 +170,10 @@ class TrackingService : Service() {
                 if (loc.hasSpeed()) loc.speed.toDouble() else null,
                 if (loc.hasBearing() && loc.hasSpeed() && loc.speed > 1f) loc.bearing.toDouble() else null)
             enqueue(fix)
+            if (fix.accuracy <= 35.0) {
+                publishTrail(fix.pos)
+                if (!areaRequested) { areaRequested = true; App.ensureArea(fix.pos) }
+            }
             fix.bearing?.let { lastHeading = it }
             updateProfile(fix, loc)
         }
@@ -231,25 +235,36 @@ class TrackingService : Service() {
         if (SystemClock.elapsedRealtime() < retryAt) return
         loading += cell
         App.scope.launch {
-            val result = App.osm.load(cell)
+            val t0 = SystemClock.elapsedRealtime()
+            val result = App.tiles.load(cell)
+            // Street corridors revealed earlier under other ids (older app version / friends) – read before switching threads.
+            val oldRoads = if (result is TileRepository.Result.Ok) withContext(Dispatchers.IO) { App.db.roadsIntersecting(cell.queryBox()) } else emptyList()
             withContext(serial) {
                 loading -= cell
                 when (result) {
-                    is OsmRepository.Result.Ok -> {
-                        android.util.Log.i("FoggyMap", "cell loaded ${cell.name}: ${result.value.segments.size} segments, " +
-                            "${result.value.faces.size} blocks (cache=${result.fromCache})")
+                    is TileRepository.Result.Ok -> {
+                        val model = result.value.model
                         failures.remove(cell)
-                        explorer?.addCell(cell, result.value)
+                        val ex = explorer
+                        if (ex != null) {
+                            ex.addCell(cell, model)
+                            val covered = ex.markCovered(model, oldRoads)
+                            cellBuildings[cell] = result.value.buildings
+                            cellBuildings.keys.retainAll(ex.loadedCells())
+                            android.util.Log.i("FoggyMap", "cell ${cell.name}: ${model.segments.size} segments, ${model.faces.size} blocks, " +
+                                "$covered known from before, " +
+                                "${SystemClock.elapsedRealtime() - t0} ms (cache=${result.fromCache})")
+                        }
                         App.scope.launch { App.refreshCoverage() }
                         explorer?.let { drain(it) }
                     }
-                    is OsmRepository.Result.Failed -> {
+                    is TileRepository.Result.Failed -> {
                         android.util.Log.w("FoggyMap", "cell ${cell.name} failed: ${result.message}")
-                        val wait = (15_000L shl attempts.coerceAtMost(5)).coerceAtMost(8 * 60_000L)
+                        val wait = (5_000L shl attempts.coerceAtMost(5)).coerceAtMost(2 * 60_000L)
                         failures[cell] = (attempts + 1) to SystemClock.elapsedRealtime() + wait
                         App.tracking.update {
                             it.copy(loadingMap = false, message = if (result.offline)
-                                "Offline: Wege werden gespeichert und später aufgedeckt (${queue.size})"
+                                "Offline – dein Weg wird gespeichert und aufgedeckt, sobald Netz da ist"
                             else "Kartendaten: ${result.message}")
                         }
                     }
@@ -260,43 +275,30 @@ class TrackingService : Service() {
 
     private fun prefetch(p: LatLon) { CellKey.needed(p).forEach { requestCell(it) } }
 
-    // ------------------------------------------------------------------ buildings (lazy)
+    // ------------------------------------------------------------------ buildings
 
-    /** New areas were revealed: show the buildings inside them (immediately if the tile is cached). */
+    /** New areas were revealed: the buildings inside them appear right away (same data as the streets). */
     private suspend fun revealBuildingsFor(newItems: List<de.foggymap.app.core.RevealItem>) {
-        val box = BuildingRevealer.bboxOf(newItems.filter { it.kind != RevealKind.BUILDING }) ?: return
-        for (tile in BuildingTileKey.covering(box)) {
-            val cached = App.osm.cachedBuildings(tile)
-            if (cached != null) storeBuildings(BuildingRevealer.reveal(cached, newItems))
-            else { pendingBuildingTiles += tile; requestBuildingTile(tile) }
+        val areas = newItems.filter { it.kind != RevealKind.BUILDING }
+        val box = BuildingRevealer.bboxOf(areas) ?: return
+        val sources = cellBuildings.values.toList()
+        // Off the explorer thread: footprints of a just loaded cell may still be in the making.
+        App.scope.launch(Dispatchers.Default) {
+            val seen = HashSet<Long>()
+            val candidates = sources.flatMap { it.await() }.filter { b -> b.ring.any { box.contains(it) } && seen.add(b.id) }
+            if (candidates.isEmpty()) return@launch
+            val existing = App.db.buildingsIntersecting(box)
+            val items = BuildingRevealer.reveal(candidates, areas, existing)
+            withContext(serial) { storeBuildings(items) }
         }
     }
 
-    private fun requestBuildingTile(tile: BuildingTileKey) {
-        if (tile in buildingTilesLoading) return
-        val (attempts, retryAt) = buildingFailures[tile] ?: (0 to 0L)
-        if (SystemClock.elapsedRealtime() < retryAt) return
-        buildingTilesLoading += tile
-        App.scope.launch {
-            val result = App.osm.loadBuildings(tile)
-            withContext(serial) {
-                buildingTilesLoading -= tile
-                when (result) {
-                    is OsmRepository.Result.Ok -> {
-                        buildingFailures.remove(tile)
-                        pendingBuildingTiles -= tile
-                        // All revealed ground touching this tile (own and from the group) gets its buildings.
-                        val areas = withContext(Dispatchers.IO) { App.db.areasIntersecting(tile.core()) }
-                        val n = storeBuildings(BuildingRevealer.reveal(result.value, areas))
-                        android.util.Log.i("FoggyMap", "buildings ${tile.name}: ${result.value.size} in tile, $n newly visible (cache=${result.fromCache})")
-                    }
-                    is OsmRepository.Result.Failed -> {
-                        val wait = (20_000L shl attempts.coerceAtMost(5)).coerceAtMost(10 * 60_000L)
-                        buildingFailures[tile] = (attempts + 1) to SystemClock.elapsedRealtime() + wait
-                    }
-                }
-            }
-        }
+    /** Light trail of your own path: shown at once, also while map data is still on its way. */
+    private fun publishTrail(p: LatLon, force: Boolean = false) {
+        val cur = App.trail.value
+        val last = cur.lastOrNull()
+        if (!force && last != null && Geo.distance(last, p) < 3.0) return
+        App.trail.value = if (cur.size >= TRAIL_POINTS) cur.drop(cur.size - TRAIL_POINTS + 1) + p else cur + p
     }
 
     private suspend fun storeBuildings(items: List<de.foggymap.app.core.RevealItem>): Int {
@@ -359,7 +361,6 @@ class TrackingService : Service() {
             }
             if (tick % 2 == 0) flushStats()
             if (tick % 2 == 0 && queueDirty) persistQueue()
-            pendingBuildingTiles.toList().forEach { requestBuildingTile(it) }
             if (tick % 12 == 0) App.sync.requestSync(0)            // every 3 minutes
             explorer?.let { ex -> if (queue.isNotEmpty()) drain(ex) }
             maybeNotify(force = tick % 4 == 0)
@@ -492,6 +493,7 @@ class TrackingService : Service() {
         const val ACTION_STOP = "de.foggymap.app.STOP"
         const val ACTION_SETTINGS_CHANGED = "de.foggymap.app.SETTINGS"
         const val MAX_QUEUE = 20_000
+        const val TRAIL_POINTS = 900
         const val STILL_AFTER_MS = 150_000L
         const val NO_SIGNAL_MS = 180_000L
 

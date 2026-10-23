@@ -114,10 +114,9 @@ class RealOsmDataTest {
         println("Helsinki: segment ${seg.name} reveals ${visible.size} of ${all.size} buildings")
         assertTrue(visible.isNotEmpty())
         assertTrue(visible.size < all.size / 4)
-        // Lazily loaded tiles: splitting the buildings into tiles gives the same result.
-        val box = BuildingRevealer.bboxOf(items)!!
-        val tiles = BuildingTileKey.covering(box)
-        val perTile = tiles.flatMap { t -> BuildingRevealer.reveal(all.filter { b -> t.queryBox().contains(b.ring[0]) }, items) }
-        assertEquals(visible.map { it.id }.toSet(), perTile.map { it.id }.toSet())
+        // Buildings already shown (e.g. from the older data source) are not added again.
+        assertTrue(BuildingRevealer.reveal(all, items, existing = visible).isEmpty())
+        val renamed = visible.map { RevealItem("g:old${it.id.removePrefix("g:")}", it.kind, it.polygons, height = it.height, minHeight = it.minHeight) }
+        assertTrue(BuildingRevealer.reveal(all, items, existing = renamed).isEmpty())
     }
 }

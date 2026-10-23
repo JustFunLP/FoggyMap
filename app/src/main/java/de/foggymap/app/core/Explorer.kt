@@ -1,28 +1,27 @@
 package de.foggymap.app.core
 
-import kotlin.math.floor
 
 /**
- * Fixed grid of street-network cells (~1.8 × 1.7 km in Germany). Only streets, railways and rivers
- * are loaded per cell (buildings come separately and lazily, see [BuildingTileKey]), so one download
- * usually covers a whole walk.
+ * Street-network cell = one z14 map tile (~1.5 × 1.5 km in Germany). Its street graph is built from
+ * the tile and its 8 neighbours, so every junction of a street inside the cell (plus [MARGIN]) is known.
  */
-data class CellKey(val i: Int, val j: Int) {
-    val name get() = "r_${i}_$j"
+data class CellKey(val x: Int, val y: Int) {
+    val name get() = "t_${x}_$y"
+    val tile get() = TileKey(x, y)
     /** Cell area expanded by a margin so that junctions of all streets inside the cell are known. */
     fun queryBox(): BBox = core().expand(MARGIN)
-    fun core(): BBox = BBox(i * LAT_STEP, j * LON_STEP, (i + 1) * LAT_STEP, (j + 1) * LON_STEP)
+    fun core(): BBox = tile.bounds()
+    /** Tiles whose data the street graph of this cell is built from. */
+    fun tiles(): List<TileKey> = tile.neighbourhood()
 
     companion object {
-        const val LAT_STEP = 0.016
-        const val LON_STEP = 0.024
-        const val MARGIN = 300.0
+        const val MARGIN = 400.0
         /** Look this far ahead in the direction of travel to load the next cell in time. */
         const val LOOKAHEAD = 300.0
         /** Without a known direction, load a neighbour only when this close to its edge. */
         const val EDGE_PREFETCH = 120.0
 
-        fun of(p: LatLon) = CellKey(floor(p.lat / LAT_STEP).toInt(), floor(p.lon / LON_STEP).toInt())
+        fun of(p: LatLon) = TileKey.of(p).let { CellKey(it.x, it.y) }
 
         /** Cells needed at [p]: the current one plus, if close, the one ahead (or the nearest neighbour). */
         fun needed(p: LatLon, heading: Double? = null): List<CellKey> {
@@ -35,10 +34,10 @@ data class CellKey(val i: Int, val j: Int) {
                 result += of(ahead)
             } else {
                 val inner = c.core().expand(-EDGE_PREFETCH)
-                val di = when { p.lat < inner.south -> -1; p.lat > inner.north -> 1; else -> 0 }
-                val dj = when { p.lon < inner.west -> -1; p.lon > inner.east -> 1; else -> 0 }
-                if (di != 0) result += CellKey(c.i + di, c.j)
-                if (dj != 0) result += CellKey(c.i, c.j + dj)
+                val dy = when { p.lat < inner.south -> 1; p.lat > inner.north -> -1; else -> 0 }   // tile y grows southwards
+                val dx = when { p.lon < inner.west -> -1; p.lon > inner.east -> 1; else -> 0 }
+                if (dy != 0) result += CellKey(c.x, c.y + dy)
+                if (dx != 0) result += CellKey(c.x + dx, c.y)
             }
             return result.toList()
         }
@@ -115,6 +114,36 @@ class Explorer(knownRoadIds: Collection<String>) {
         val mid = s.points[s.points.size / 2]
         return models.values.filter { it.segmentById[s.id]?.complete == true }
             .minByOrNull { Geo.distance(it.data.bbox.center, mid) }
+    }
+
+    /**
+     * Segments lying inside street corridors that were revealed earlier under other ids (older data
+     * source, friends on an older app version) count as known: nothing is revealed or counted twice.
+     */
+    fun markCovered(model: WorldModel, roads: Collection<RevealItem>): Int {
+        val gf = model.gf
+        val polys = ArrayList<org.locationtech.jts.geom.Geometry>()
+        for (it in roads) {
+            if (it.kind != RevealKind.ROAD || it.id.removePrefix("r:") in model.segmentById) continue
+            for (p in it.polygons) try {
+                val ring = if (p[0].first() == p[0].last()) p[0] else p[0] + p[0].first()
+                polys += gf.createPolygon(ring.map(model.proj::toLocal).toTypedArray()).buffer(0.0)
+            } catch (_: Exception) { }
+        }
+        if (polys.isEmpty()) return 0
+        val area = try { org.locationtech.jts.operation.union.UnaryUnionOp.union(polys).buffer(2.0) } catch (_: Exception) { return 0 }
+        val prepared = org.locationtech.jts.geom.prep.PreparedGeometryFactory.prepare(area)
+        var n = 0
+        for (s in model.segments) {
+            if (!s.matchable || s.id in revealedSegments || !prepared.intersects(s.line)) continue
+            val len = s.length
+            val k = maxOf(3, (len / 10).toInt())
+            val idx = org.locationtech.jts.linearref.LengthIndexedLine(s.line)
+            var inside = 0
+            for (i in 0..k) if (prepared.contains(gf.createPoint(idx.extractPoint(len * i / k)))) inside++
+            if (inside >= 0.85 * (k + 1)) { revealedSegments += s.id; matcher.markKnown(listOf(s.id)); n++ }
+        }
+        return n
     }
 
     companion object { const val MAX_CELLS = 4 }

@@ -48,6 +48,22 @@ class Prefs(context: Context) {
         get() = p.getBoolean("perspective", true)
         set(v) = p.edit().putBoolean("perspective", v).apply()
 
+    // ------------------------------------------------------------ offline map area
+
+    /** Centre/radius/time of the last completed background download of the surroundings. */
+    var areaLat: Double
+        get() = java.lang.Double.longBitsToDouble(p.getLong("area_lat", java.lang.Double.doubleToLongBits(Double.NaN)))
+        set(v) = p.edit().putLong("area_lat", java.lang.Double.doubleToLongBits(v)).apply()
+    var areaLon: Double
+        get() = java.lang.Double.longBitsToDouble(p.getLong("area_lon", java.lang.Double.doubleToLongBits(Double.NaN)))
+        set(v) = p.edit().putLong("area_lon", java.lang.Double.doubleToLongBits(v)).apply()
+    var areaRadius: Double
+        get() = p.getFloat("area_radius", 0f).toDouble()
+        set(v) = p.edit().putFloat("area_radius", v.toFloat()).apply()
+    var areaAt: Long
+        get() = p.getLong("area_at", 0)
+        set(v) = p.edit().putLong("area_at", v).apply()
+
     // ------------------------------------------------------------ coop
 
     var server: String

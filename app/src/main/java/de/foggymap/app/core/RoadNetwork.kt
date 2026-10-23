@@ -88,10 +88,15 @@ object RoadNetworkBuilder {
             for (c in 0 until cuts.size - 1) {
                 val from = cuts[c]; val to = cuts[c + 1]
                 if (to <= from) continue
-                val pts = w.points.subList(from, to + 1)
-                val a = w.nodes[from]; val b = w.nodes[to]
+                var pts = w.points.subList(from, to + 1)
+                var a = w.nodes[from]; var b = w.nodes[to]
+                if (data.syntheticIds && canonicalReversed(a, b, w.nodes, from, to)) {
+                    // Same orientation in every cell, so chunk numbers are stable too.
+                    pts = pts.asReversed(); val t = a; a = b; b = t
+                }
                 val complete = pts.all { data.bbox.contains(it) }
-                val baseId = "${w.id}:${minOf(a, b)}-${maxOf(a, b)}" + if (a == b) ":$from" else ""
+                val baseId = if (data.syntheticIds) syntheticId(r.cls, a, b, pts)
+                    else "${w.id}:${minOf(a, b)}-${maxOf(a, b)}" + if (a == b) ":$from" else ""
                 val coords = pts.map(proj::toLocal).toTypedArray()
                 if (coords.size < 2) continue
                 val line = gf.createLineString(coords)
@@ -109,6 +114,24 @@ object RoadNetworkBuilder {
             }
         }
         return out
+    }
+
+    private fun canonicalReversed(a: Long, b: Long, nodes: LongArray, from: Int, to: Int): Boolean {
+        if (a != b) return a > b
+        if (to - from < 2) return false
+        return nodes[from + 1] > nodes[to - 1]
+    }
+
+    /**
+     * Id from the end junctions plus an order-independent fingerprint of the shape (two different
+     * streets between the same two junctions get different ids). Only characters allowed in
+     * [RevealItem.ID_PATTERN].
+     */
+    fun syntheticId(cls: RoadClass, a: Long, b: Long, pts: List<LatLon>): String {
+        var sLat = 0L; var sLon = 0L
+        for (p in pts) { sLat += Math.round(p.lat * 1e6); sLon += Math.round(p.lon * 1e6) }
+        val shape = ((sLat * 31 + sLon) and 0xFFFFFFFFFFL).toString(36)
+        return "v${cls.ordinal}.${minOf(a, b).toString(36)}-${maxOf(a, b).toString(36)}~$shape"
     }
 
     fun isElevated(tags: Map<String, String>): Boolean {

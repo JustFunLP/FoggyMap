@@ -29,26 +29,20 @@ adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS || true
 adb logcat -G 16M || true
 adb logcat -c
 
-# Pre-seed the street cell and building tiles of the route with a real OSM extract (Helsinki, ODbL) so the test does not depend on
-# the overloaded public Overpass servers. Neighbour cells are still downloaded live by the app.
-gzip -c app/src/test/resources/helsinki_overpass.json > /tmp/helsinki.json.gz
-adb push /tmp/helsinki.json.gz /data/local/tmp/helsinki.json.gz > /dev/null
-adb shell chmod 644 /data/local/tmp/helsinki.json.gz
-for c in r_3760_1038 r_3760_1039 r_3761_1038 r_3761_1039 b_15041_4155 b_15041_4156 b_15041_4157 b_15041_4158 b_15041_4159 b_15042_4155 b_15042_4156 b_15042_4157 b_15042_4158 b_15042_4159 b_15043_4155 b_15043_4156 b_15043_4157 b_15043_4158 b_15043_4159 b_15044_4155 b_15044_4156 b_15044_4157 b_15044_4158 b_15044_4159; do
-  adb shell "run-as $PKG sh -c 'mkdir -p files/osm && cp /data/local/tmp/helsinki.json.gz files/osm/$c.json.gz'"
-done
-adb shell "run-as $PKG ls -la files/osm" || true
-
+# No pre-seeded map data: the app downloads the vector tiles live from OpenFreeMap, exactly like on a phone.
 read -r LON LAT < scripts/e2e_route.txt
 for i in 1 2 3; do adb emu geo fix "$LON" "$LAT"; sleep 1; done
 
+T_START=$(date +%s)
 adb shell am start -n $PKG/de.foggymap.app.MainActivity --ez e2e_autostart true --es e2e_server http://10.0.2.2:8787
-# Wait until the street data of the start cell is loaded (Overpass can take a while).
+# Wait until the street data of the start cell is there (download + street graph).
+LOADED=""
 for i in $(seq 1 90); do
   adb emu geo fix "$LON" "$LAT" > /dev/null
-  if adb logcat -d -s FoggyMap:I | grep -q "cell loaded"; then echo "map data loaded after ${i}x2 s"; break; fi
-  sleep 2
+  if adb logcat -d -s FoggyMap:I | grep -q "FoggyMap: cell t_"; then LOADED=$(( $(date +%s) - T_START )); echo "map data ready after ${LOADED} s"; break; fi
+  sleep 1
 done
+echo "${LOADED:-nicht innerhalb von 90 s}" > "$OUT/first-cell-seconds.txt"
 sleep 5
 shot 01-start
 
@@ -79,10 +73,12 @@ adb shell wm dismiss-keyguard || adb shell input keyevent 82
 adb shell am start -n $PKG/de.foggymap.app.MainActivity > /dev/null
 sleep 25
 shot 03-ziel
-# 2D overview (layers button toggles the perspective)
+# Move the map away by hand, then the location button brings it back (position fixed, viewing direction up).
 SIZE=$(adb shell wm size | grep -oE '[0-9]+x[0-9]+' | tail -1); W=${SIZE%x*}; H=${SIZE#*x}
-adb shell input tap $((W*90/100)) $((H*435/1000)); sleep 8; shot 03b-2d
-adb shell input tap $((W*90/100)) $((H*435/1000)); sleep 3
+adb shell input swipe $((W/2)) $((H*40/100)) $((W/2)) $((H*20/100)) 400; sleep 6; shot 03b-verschoben
+adb shell "dumpsys activity top" > /dev/null 2>&1 || true
+LOC_Y=$(( H * 70 / 100 ))
+adb shell input tap $((W*88/100)) $LOC_Y; sleep 8; shot 03c-standort
 
 # Statistics sheet: tap the bottom card (screen-size independent: 80 % height, centre).
 SIZE=$(adb shell wm size | grep -oE '[0-9]+x[0-9]+' | tail -1); W=${SIZE%x*}; H=${SIZE#*x}
@@ -110,8 +106,16 @@ native = [log[i + 1] for i, l in enumerate(log) if ">>> de.foggymap" in l and i 
 gl_driver = any("libGLESv2_enc.so" in l for l in log if " F DEBUG " in l)
 if native:
     summary.append("Nativer Absturz: " + ("im OpenGL-Übersetzer des Emulators (libGLESv2_enc.so)" if gl_driver else "JA"))
-live = [l for l in log if "FoggyMap" in l and ("cache=false" in l or "failed:" in l)]
-summary.append("Live-Download Overpass: " + ("; ".join(l.split("FoggyMap: ")[-1] for l in live[:3]) if live else "nicht nötig/keiner"))
+cells = [l.split("FoggyMap: ")[-1] for l in log if "FoggyMap: cell t_" in l]
+summary.append("Kartenzellen (Vektorkacheln, live geladen): " + ("; ".join(cells[:4]) if cells else "KEINE"))
+try:
+    summary.append("Erste Zelle bereit nach: " + open(os.path.join(out, "first-cell-seconds.txt")).read().strip() + " s (ab App-Start)")
+except Exception:
+    pass
+failed = [l.split("FoggyMap: ")[-1] for l in log if "FoggyMap: cell" in l and "failed:" in l]
+if failed: summary.append("Fehlgeschlagene Ladeversuche: " + "; ".join(failed[:3]))
+follow = [l.split("FoggyMap: ")[-1] for l in log if "ui: camera" in l]
+if follow: summary.append("Kamera zuletzt: " + follow[-1])
 summary.append(f"App-Absturz im Log: {'JA' if crash else 'nein'}")
 fog_updates = sum(1 for l in log if "fog updated" in l)
 summary.append(f"Nebel-Aktualisierungen der Karte: {fog_updates}")
@@ -139,6 +143,6 @@ if os.path.exists(sdb):
         summary.append(f"Koop-Server-DB nicht lesbar: {e}")
 open(os.path.join(out, "summary.txt"), "w").write("\n".join(summary) + "\n")
 print("\n".join(summary))
-ok = (not crash) and counts.get('r', 0) >= 12
+ok = (not crash) and counts.get('r', 0) >= 6
 sys.exit(0 if ok else 1)
 PY

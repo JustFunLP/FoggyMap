@@ -70,6 +70,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.foggymap.app.App
+import de.foggymap.app.data.TileRepository
+import de.foggymap.app.core.LatLon
 import de.foggymap.app.BuildConfig
 import de.foggymap.app.Coverage
 import de.foggymap.app.R
@@ -369,11 +371,13 @@ fun SettingsSheet(onChanged: () -> Unit, onDataCleared: () -> Unit, onDismiss: (
     var battery by remember { mutableIntStateOf(prefs.batteryMode.ordinal) }
     var b3d by remember { mutableStateOf(prefs.buildings3d) }
     var anim by remember { mutableStateOf(prefs.fogAnimation) }
+    var tilt by remember { mutableStateOf(prefs.perspective) }
+    val area by App.tiles.prefetch.collectAsState()
     var server by remember { mutableStateOf(prefs.server) }
     var confirmReset by remember { mutableStateOf(false) }
     var cacheMb by remember { mutableStateOf(0.0) }
     var refreshKey by remember { mutableIntStateOf(0) }
-    LaunchedEffect(refreshKey) { cacheMb = withContext(Dispatchers.IO) { App.osm.cacheSizeBytes() / 1_048_576.0 } }
+    LaunchedEffect(refreshKey, area.running, area.done) { cacheMb = withContext(Dispatchers.IO) { App.tiles.cacheSizeBytes() / 1_048_576.0 } }
 
     FogSheet(onDismiss) {
         Text("Einstellungen", fontSize = 22.sp, fontWeight = FontWeight.Bold)
@@ -391,6 +395,7 @@ fun SettingsSheet(onChanged: () -> Unit, onDataCleared: () -> Unit, onDismiss: (
             painterResource(R.drawable.ic_battery), Fog.Success)
 
         SectionTitle("Darstellung")
+        SwitchRow("3D-Perspektive", "Karte geneigt, du siehst nach vorn (sonst Draufsicht)", tilt) { tilt = it; prefs.perspective = it; onChanged() }
         SwitchRow("3D-Gebäude", "Aufgedeckte Gebäude plastisch darstellen", b3d) { b3d = it; prefs.buildings3d = it; onChanged() }
         SwitchRow("Animationen", "Nebel-Auflösung, wachsende Gebäude, leuchtender Rand", anim) { anim = it; prefs.fogAnimation = it; onChanged() }
 
@@ -423,9 +428,30 @@ fun SettingsSheet(onChanged: () -> Unit, onDataCleared: () -> Unit, onDismiss: (
             if (server.isEmpty() || Invite.isValidServer(server)) { prefs.server = server; App.sync.refreshState() }
         }) { Text("Server übernehmen", color = Fog.Violet2) }
 
+        SectionTitle("Offline-Karte")
+        Text("Gespeichert: ${cacheMb.de(1)} MB", fontSize = 13.sp)
+        Text("Beim Erkunden lädt FoggyMap die Umgebung automatisch im Hintergrund (im WLAN die ganze Stadt, ca. 8 km, " +
+            "mit mobilen Daten ca. 3 km). Danach geht alles auch ohne Netz.", color = Fog.Muted, fontSize = 12.sp, lineHeight = 16.sp)
+        if (area.running) {
+            Spacer(Modifier.height(8.dp))
+            androidx.compose.material3.LinearProgressIndicator(
+                progress = { if (area.total == 0) 0f else area.done.toFloat() / area.total },
+                color = Fog.Cyan, trackColor = Fog.SurfaceHigh, modifier = Modifier.fillMaxWidth())
+            Text("Lade ${area.radiusKm}-km-Umkreis: ${area.done} von ${area.total} Kacheln · ${(area.bytes / 1_048_576.0).de(1)} MB",
+                color = Fog.Muted, fontSize = 12.sp)
+        } else {
+            val here = App.location.collectAsState().value
+            val start = here?.let { LatLon(it.latitude, it.longitude) }
+                ?: prefs.lastLat.takeIf { !it.isNaN() }?.let { LatLon(it, prefs.lastLon) }
+            TextButton(enabled = start != null, onClick = { start?.let { App.ensureArea(it, TileRepository.CITY_RADIUS) } }) {
+                Text("Ganze Stadt herunterladen (12 km Umkreis)", color = Fog.Violet2)
+            }
+            area.message?.let { Text(it, color = Fog.Amber, fontSize = 12.sp) }
+            if (!area.running && area.total > 0 && area.message == null) Text("Fertig: ${area.done} Kacheln geladen.", color = Fog.Success, fontSize = 12.sp)
+        }
+
         SectionTitle("Daten")
-        Text("Offline-Kartendaten: ${cacheMb.de(1)} MB", fontSize = 13.sp)
-        TextButton(onClick = { App.osm.clearCache(); refreshKey++ }) { Text("Straßendaten-Cache leeren", color = Fog.Violet2) }
+        TextButton(onClick = { App.tiles.clearCache(); refreshKey++ }) { Text("Offline-Kartendaten löschen", color = Fog.Violet2) }
         TextButton(onClick = { confirmReset = true }) {
             Icon(rememberVectorPainter(Icons.Filled.Delete), null, tint = Fog.Danger, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(6.dp)); Text("Alle Erkundungsdaten löschen", color = Fog.Danger)
@@ -445,7 +471,7 @@ fun SettingsSheet(onChanged: () -> Unit, onDataCleared: () -> Unit, onDismiss: (
                 else -> {}
             }
         }
-        Text("Kartendaten © OpenStreetMap-Mitwirkende (ODbL) · Vektorkacheln: OpenFreeMap / OpenMapTiles · Straßendaten: Overpass API · " +
+        Text("Kartendaten © OpenStreetMap-Mitwirkende (ODbL) · Karten- und Straßendaten: OpenFreeMap / OpenMapTiles · " +
             "Kartendarstellung: MapLibre Native · Geometrie: JTS Topology Suite.", color = Fog.Muted, fontSize = 11.sp, lineHeight = 15.sp)
         TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.openstreetmap.org/copyright"))) }) {
             Text("OpenStreetMap-Lizenz", color = Fog.Violet2)

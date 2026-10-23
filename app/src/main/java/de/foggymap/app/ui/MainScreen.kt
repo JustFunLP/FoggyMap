@@ -101,8 +101,11 @@ fun MainScreen(activity: MainActivity) {
     val counts by produceState<RevealDatabase.Counts?>(null, dbVersion) { value = withContext(Dispatchers.IO) { App.db.counts() } }
 
     var controller by remember { mutableStateOf<FogMapController?>(null) }
-    var follow by remember { mutableStateOf(FogMapController.Follow.FOLLOW) }
-    var perspective by remember { mutableStateOf(App.prefs.perspective) }
+    /** Map fixed on you with your viewing direction up (the location button). */
+    var following by remember { mutableStateOf(false) }
+    /** The user moved the map away by hand – do not grab it back automatically. */
+    var releasedByUser by remember { mutableStateOf(false) }
+    val perspective = App.prefs.perspective
     var sheet by remember { mutableStateOf(if (activity.pendingInvite != null) Sheet.GROUP else Sheet.NONE) }
     var permissionProblem by remember { mutableStateOf<String?>(null) }
     var locationEnabled by remember { mutableStateOf(false) }
@@ -110,7 +113,7 @@ fun MainScreen(activity: MainActivity) {
     // ------------------------------------------------------------------ permissions → start
     fun startTracking() {
         TrackingService.start(context)
-        follow = FogMapController.Follow.FOLLOW
+        releasedByUser = false
     }
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { startTracking() }
     val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
@@ -144,7 +147,7 @@ fun MainScreen(activity: MainActivity) {
     LaunchedEffect(controller) {
         val c = controller ?: return@LaunchedEffect
         c.animationsEnabled = App.prefs.fogAnimation
-        c.onTrackingDismissed = { follow = FogMapController.Follow.FREE }
+        c.onTrackingDismissed = { following = false; releasedByUser = true }
         if (MainActivity.hasFineLocation(context)) locationEnabled = c.enableLocation()
         val last = App.location.value ?: if (MainActivity.hasFineLocation(context)) lastKnown(context) else null
         last?.let { App.location.value = it }
@@ -164,9 +167,38 @@ fun MainScreen(activity: MainActivity) {
         while (true) { kotlinx.coroutines.delay(10_000); controller?.let { android.util.Log.i("FoggyMap", "ui: " + it.debugState()) } }
     }
     LaunchedEffect(controller, location, locationEnabled) { location?.let { controller?.updateLocation(it) } }
-    LaunchedEffect(controller, tracking.active, follow, locationEnabled, location != null) {
+    // While exploring, the map follows you until you move it away by hand.
+    LaunchedEffect(controller, tracking.active, location != null) {
         val c = controller ?: return@LaunchedEffect
-        if (tracking.active && location != null && locationEnabled) c.setFollow(follow, perspective)
+        if (tracking.active && location != null && !following && !releasedByUser) { c.startFollowing(App.prefs.perspective); following = true }
+    }
+    LaunchedEffect(controller) { val c = controller ?: return@LaunchedEffect; App.trail.collect { c.updateTrail(it) } }
+    // Viewing direction (compass) and – when not exploring – your position, only while the map is visible.
+    val compass = remember { Compass(context) { az -> controller?.updateCompass(az) } }
+    LaunchedEffect(location) { location?.let { compass.setLocation(it.latitude, it.longitude, it.altitude) } }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, tracking.active, following, locationEnabled) {
+        val lm = context.getSystemService(LocationManager::class.java)
+        val listener = android.location.LocationListener { loc -> if (!App.tracking.value.active) App.location.value = loc }
+        var registered = false
+        fun startUiLocation() {
+            if (tracking.active || !following || registered || !MainActivity.hasFineLocation(context)) return
+            val providers = buildList {
+                if (Build.VERSION.SDK_INT >= 31 && lm.allProviders.contains(LocationManager.FUSED_PROVIDER)) add(LocationManager.FUSED_PROVIDER)
+                else { add(LocationManager.GPS_PROVIDER); add(LocationManager.NETWORK_PROVIDER) }
+            }
+            for (pr in providers) runCatching { lm.requestLocationUpdates(pr, 1000L, 0f, listener, android.os.Looper.getMainLooper()); registered = true }
+        }
+        fun stopUiLocation() { if (registered) { runCatching { lm.removeUpdates(listener) }; registered = false } }
+        val obs = LifecycleEventObserver { _, e ->
+            when (e) {
+                Lifecycle.Event.ON_RESUME -> { compass.start(); startUiLocation() }
+                Lifecycle.Event.ON_PAUSE -> { compass.stop(); stopUiLocation() }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs); compass.stop(); stopUiLocation() }
     }
     LaunchedEffect(controller, syncUi.members) { controller?.showFriends(syncUi.members) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -211,28 +243,19 @@ fun MainScreen(activity: MainActivity) {
             RevealBanner(tracking)
         }
 
-        // Right-hand map controls (as in the design: layers · locate · navigation)
-        Column(Modifier.align(Alignment.CenterEnd).padding(end = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            RoundButton(painterResource(R.drawable.ic_layers), "3D-Ansicht", active = perspective) {
-                perspective = !perspective
-                App.prefs.perspective = perspective
-                controller?.setPerspective(perspective)
-            }
-            RoundButton(painterResource(R.drawable.ic_crosshair), "Auf mich zentrieren", active = follow == FogMapController.Follow.NORTH) {
-                val loc = location
-                if (loc == null) { onStartClicked(); return@RoundButton }
-                follow = FogMapController.Follow.NORTH
-                if (locationEnabled) controller?.setFollow(follow, perspective)
-                else controller?.moveTo(LatLon(loc.latitude, loc.longitude), 17.0, perspective)
-            }
-            RoundButton(painterResource(R.drawable.ic_navigation), "Mitfahren", active = follow == FogMapController.Follow.FOLLOW && tracking.active) {
-                follow = FogMapController.Follow.FOLLOW
-                if (locationEnabled) controller?.setFollow(follow, perspective)
-            }
-        }
-
-        // Bottom card
+        // Bottom: the location button sits right above the card.
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.End) {
+                LocateButton(following) {
+                    releasedByUser = false
+                    if (!MainActivity.hasFineLocation(context)) {
+                        locationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                        return@LocateButton
+                    }
+                    following = true
+                    controller?.startFollowing(App.prefs.perspective)
+                }
+            }
             BottomCard(coverage?.percent, counts, tracking, onExpand = { sheet = Sheet.STATS }, onStart = { onStartClicked() })
         }
     }
@@ -243,6 +266,7 @@ fun MainScreen(activity: MainActivity) {
         Sheet.SETTINGS -> SettingsSheet(
             onChanged = {
                 controller?.setBuildingsVisible(App.prefs.buildings3d)
+                controller?.setPerspective(App.prefs.perspective)
                 controller?.animationsEnabled = App.prefs.fogAnimation
                 if (!App.prefs.fogAnimation) controller?.stopAmbient() else controller?.startAmbient()
                 TrackingService.settingsChanged(context)
@@ -268,6 +292,18 @@ fun MainScreen(activity: MainActivity) {
             },
             dismissButton = { TextButton(onClick = { permissionProblem = null }) { Text("Später", color = Fog.Muted) } },
         )
+    }
+}
+
+/** One button: fix the map on your position, viewing direction up. Filled while it is active. */
+@Composable
+private fun LocateButton(active: Boolean, onClick: () -> Unit) {
+    Box(Modifier.size(54.dp).clip(CircleShape)
+        .background(if (active) Fog.button else Brush.linearGradient(listOf(Fog.Surface.copy(alpha = 0.92f), Fog.Surface.copy(alpha = 0.92f))))
+        .border(1.dp, if (active) Color.White.copy(alpha = 0.25f) else Fog.Line, CircleShape)
+        .clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Icon(painterResource(R.drawable.ic_navigation), if (active) "Karte folgt dir" else "Auf meinen Standort",
+            tint = if (active) Color.White else Fog.Lavender, modifier = Modifier.size(24.dp))
     }
 }
 

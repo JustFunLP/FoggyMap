@@ -95,10 +95,14 @@ class RevealDatabase(context: Context) : SQLiteOpenHelper(context, "foggymap.db"
     }
 
     /** Revealed areas (not buildings) whose bounding box overlaps [b]. */
-    fun areasIntersecting(b: BBox): List<RevealItem> {
+    fun areasIntersecting(b: BBox): List<RevealItem> = itemsIntersecting(b, "kind != 'g'")
+    fun buildingsIntersecting(b: BBox): List<RevealItem> = itemsIntersecting(b, "kind = 'g'")
+    fun roadsIntersecting(b: BBox): List<RevealItem> = itemsIntersecting(b, "kind = 'r'")
+
+    private fun itemsIntersecting(b: BBox, kindFilter: String): List<RevealItem> {
         val out = ArrayList<RevealItem>()
         readableDatabase.rawQuery(
-            "SELECT data FROM reveal WHERE kind != 'g' AND s <= ? AND n >= ? AND w <= ? AND e >= ?",
+            "SELECT data FROM reveal WHERE $kindFilter AND s <= ? AND n >= ? AND w <= ? AND e >= ?",
             arrayOf(b.north.toString(), b.south.toString(), b.east.toString(), b.west.toString())).use { c ->
             while (c.moveToNext()) RevealItem.fromJson(JSONObject(c.getString(0)))?.let(out::add)
         }

@@ -12,7 +12,11 @@ class OsmWay(
     operator fun get(key: String) = tags[key]
 }
 
-class OsmData(val ways: List<OsmWay>, val bbox: BBox)
+/**
+ * [syntheticIds]: way/node ids do not come from OSM but from coordinates (vector tiles), so segment
+ * ids must be derived from the geometry instead of the way id.
+ */
+class OsmData(val ways: List<OsmWay>, val bbox: BBox, val syntheticIds: Boolean = false)
 
 object OverpassQuery {
     private const val HIGHWAY_FILTER =

@@ -5,30 +5,6 @@ import org.locationtech.jts.geom.GeometryFactory
 import org.locationtech.jts.geom.Polygon
 import org.locationtech.jts.index.strtree.STRtree
 import org.locationtech.jts.operation.union.UnaryUnionOp
-import kotlin.math.floor
-
-/**
- * Small tiles (~450 × 420 m) for building footprints. They are only downloaded where something
- * has actually been revealed, so a walk needs a few small downloads instead of whole districts.
- */
-data class BuildingTileKey(val i: Int, val j: Int) {
-    val name get() = "b_${i}_$j"
-    fun core() = BBox(i * LAT_STEP, j * LON_STEP, (i + 1) * LAT_STEP, (j + 1) * LON_STEP)
-    /** Buildings straddling the tile edge are returned whole by Overpass anyway; a small margin is enough. */
-    fun queryBox() = core().expand(15.0)
-
-    companion object {
-        const val LAT_STEP = 0.004
-        const val LON_STEP = 0.006
-        fun of(p: LatLon) = BuildingTileKey(floor(p.lat / LAT_STEP).toInt(), floor(p.lon / LON_STEP).toInt())
-        fun covering(b: BBox): List<BuildingTileKey> {
-            val a = of(LatLon(b.south, b.west)); val z = of(LatLon(b.north, b.east))
-            val out = ArrayList<BuildingTileKey>()
-            for (i in a.i..z.i) for (j in a.j..z.j) out += BuildingTileKey(i, j)
-            return out
-        }
-    }
-}
 
 /** A building footprint in geographic coordinates. */
 class BuildingFootprint(val id: Long, val ring: List<LatLon>, val height: Double, val minHeight: Double)
@@ -55,13 +31,28 @@ object BuildingParser {
  * at least 40 % of its footprint is covered. Works for own reveals and for areas synced from friends.
  */
 object BuildingRevealer {
-    fun reveal(buildings: Collection<BuildingFootprint>, revealed: Collection<RevealItem>): List<RevealItem> {
+    /**
+     * [existing]: buildings already shown (also from an older data source with other ids); a building
+     * whose centre lies inside one of them is not added a second time.
+     */
+    fun reveal(buildings: Collection<BuildingFootprint>, revealed: Collection<RevealItem>,
+               existing: Collection<RevealItem> = emptyList()): List<RevealItem> {
         val areas = revealed.filter { it.kind != RevealKind.BUILDING }
         if (buildings.isEmpty() || areas.isEmpty()) return emptyList()
         val all = areas.flatMap { it.polygons.flatMap { p -> p.first() } }
         val origin = LatLon(all.sumOf { it.lat } / all.size, all.sumOf { it.lon } / all.size)
         val proj = LocalProjection(origin)
         val gf = GeometryFactory()
+        val shown = STRtree()
+        val existingIds = HashSet<String>()
+        for (it in existing) {
+            if (it.kind != RevealKind.BUILDING) continue
+            existingIds += it.id
+            for (poly in it.polygons) try {
+                val g = gf.createPolygon(closed(poly[0]).map(proj::toLocal).toTypedArray())
+                shown.insert(g.envelopeInternal, g)
+            } catch (_: Exception) { }
+        }
         val geoms = ArrayList<Geometry>()
         for (it in areas) for (poly in it.polygons) try {
             val shell = gf.createLinearRing(closed(poly[0]).map(proj::toLocal).toTypedArray())
@@ -92,6 +83,10 @@ object BuildingRevealer {
                 area.contains(poly.interiorPoint) || poly.intersection(area).area >= 0.4 * poly.area
             } catch (_: Exception) { false }
             if (!inside) continue
+            if ("g:${b.id}" in existingIds) continue
+            val centre = poly.interiorPoint
+            @Suppress("UNCHECKED_CAST")
+            if ((shown.query(centre.envelopeInternal) as List<Geometry>).any { g -> try { g.contains(centre) } catch (_: Exception) { false } }) continue
             val item = RevealItem("g:${b.id}", RevealKind.BUILDING, RevealItem.polygonsOf(poly.buffer(0.8), proj, 0.3),
                 height = b.height, minHeight = b.minHeight)
             if (item.polygons.isNotEmpty()) out += item
