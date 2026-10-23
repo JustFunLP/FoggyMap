@@ -14,7 +14,7 @@ Stand: 23.10.2026. Alle Ergebnisse stammen aus echten Läufen, die du jederzeit 
 
 ## ✅ Automatisch getestet
 
-**1. Kernlogik (70 Unit-Tests, laufen bei jedem Build)**
+**1. Kernlogik (72 Unit-Tests, laufen bei jedem Build)**
 - Straßenaufteilung: Teilung an Kreuzungen, Fußwege teilen keine Straßen, Brücken bilden keine Kreuzung, Gehwege und Zufahrten werden ignoriert, lange Landstraßen werden gestückelt, die IDs sind kachelübergreifend stabil.
 - **Straßennetz aus Vektorkacheln (neu, ersetzt Overpass):** Mit künstlich erzeugten Kacheln (Schnitt an Kachelrändern, weggekürzte Kreuzungspunkte) und mit **echten OpenFreeMap-Kacheln** aus Odenthal (Dorf) und Berlin-Prenzlauer Berg, verglichen mit den Overpass-Daten derselben Gegend vom selben Tag:
   - 62 von 62 bzw. 65 von 65 echten Kreuzungen gefunden, keine Straße fehlt.
@@ -27,6 +27,7 @@ Stand: 23.10.2026. Alle Ergebnisse stammen aus echten Läufen, die du jederzeit 
 - Blockzuordnung: Ein Abschnitt deckt genau die 2 angrenzenden Blöcke auf, nicht den Block hinter der Parallelstraße und nicht die Kreuzungsfortsetzung. Riesenblöcke (24 ha) werden nur als Streifen aufgedeckt. Ein Fußweg im Park deckt nur einen Streifen auf. Bahnlinien begrenzen Blöcke. In Dörfern ohne Blöcke werden nur Häuser ohne dazwischenliegende Straße aufgedeckt.
 - GPS-Jitter: 15 Zufallsläufe mit 0 Fehlaufdeckungen beim Stehen an einer Kreuzung (±7 m Streuung, 2,5 min), 0 Fehlaufdeckungen einer nur 20 m entfernten Parallelstraße und 0 verpasste Straßen. Ungenaue Positionen (±60 m) und GPS-Sprünge werden verworfen. Bei Autotempo zählen Fuß- und Radwege nicht.
 - Offline-Erkundung: Fortschritt übersteht den Neustart ohne Duplikate.
+- Gemerkte Orte fürs GPS (neu): Ein Ort gilt nach zweimal Stillstehen als bekannt, GPS-Streuung von 25 m zählt als derselbe Ort, 150 m daneben nicht. Höchstens 40 Orte, die ältesten fallen zuerst weg.
 - Zusammenführung zweier Nutzer: Vereinigung ohne Verlust und ohne Duplikate, unabhängig von der Reihenfolge, Wiederholungen sind folgenlos.
 - **Koop ohne Server (neu):** Die Signaturen (BIP-340) bestehen alle 19 offiziellen Testvektoren. Ereignisse werden exakt nach NIP-01 serialisiert, signiert und geprüft, eine veränderte Nachricht fällt durch. Nur wer den Gruppencode kennt, kann die Daten lesen: Mit einem anderen Code oder bei manipulierten Daten kommt nichts heraus. Auch über 1.000 Funde passen in Pakete unter 60 KB, und neue Funde ändern nur das letzte Paket.
 
@@ -42,7 +43,7 @@ Die erste Kartenzelle war im Emulator nach 35 s fertig (ab App-Start). Der Zella
 Die Karte selbst lässt sich im GitHub-Emulator nicht anzeigen: Ohne Grafikkarte stürzt der OpenGL-Übersetzer des Emulators ab (`libGLESv2_enc.so`), die Screenshots zeigen deshalb den Startbildschirm. Ob echte Geräte betroffen sind, kann ich ohne Gerät nicht sicher sagen. Auf deinem Handy lief die Karte bisher.
 
 **4. Oberfläche (Screenshots ohne Gerät)**
-Menü (Erkunden, Koop mit und ohne Gruppe, App) und die Kartenansicht (Kopfzeile, Standort-Knopf, Statistik-Karte) werden bei jedem Build mit Robolectric gerendert und als Bilder abgelegt. Geprüft am 23.10.2026: Texte, Schalter, Skizzen der Aufdeck-Modi.
+Menü (Info, Erkunden, Koop mit und ohne Gruppe, App) und die Kartenknöpfe (Menü, Kompass, 2D/3D, Standort, Start/Beenden) werden bei jedem Build mit Robolectric gerendert und als Bilder abgelegt. Geprüft am 23.10.2026: Texte, Schalter, Skizzen der Aufdeck-Modi, Kompassnadel, Info-Reiter mit GPS-Zustand.
 
 **5. Aufdeck-Modi (Unit-Tests)**
 Häuserblöcke, Straßenzug (einstellbare Breite, endet an der nächsten Straße) und Umkreis (Radius um den GPS-Weg, ohne Kartendaten, im Stillstand kaum neue Flächen). Eine Straße mit Block auf einer Seite und offenem Land auf der anderen zeigt beide Seiten. Sehr große Blöcke zeigen nur die Häuser an der Straße.
@@ -58,8 +59,8 @@ Die neuen 3D-Gebäude (Fassaden mit beleuchteten Fenstern, dunkle Dächer, minde
 ## ⚠️ Nicht getestet (konnte ich ohne echtes Handy nicht prüfen)
 
 - **Echtes Gerät, echtes GPS draußen**, insbesondere in Häuserschluchten, unter Bäumen und im Auto.
-- **Akkuverbrauch in Prozent pro Stunde**. Die Sparmaßnahmen sind umgesetzt, aber nicht gemessen. „Sparsam“ fragt das GPS jetzt beim Fahren alle 2 s statt alle 4 s ab (das GPS bleibt bei so kurzen Abständen ohnehin an) und spart stattdessen über größere Bündel.
-- **Standort-Knopf mit Blickrichtung (Kompass)** und die neue 3D-Optik auf einem echten Gerät.
+- **Akkuverbrauch in Prozent pro Stunde**. Die automatische GPS-Steuerung (voll in Bewegung, gedrosselt nach 30 s Stehen, Pause nach 2,5 min bzw. 40 s an bekannten Orten) ist umgesetzt und mit Unit-Tests für das Merken der Orte geprüft, der Verbrauch aber nicht gemessen.
+- **Kompass-Knopf, 2D/3D-Knopf, Standort-Knopf** und die 3D-Optik auf einem echten Gerät. Wie stark die Straßen unter dem Nebel auf deinem Bildschirm durchschimmern, habe ich nur in der Browser-Vorschau abgestimmt.
 - **Ladezeit der ersten Kartenzelle auf einem echten Handy** (PC 0,15 s, langsamer CI-Emulator 2–14 s).
 - **Selbst-Update auf einem echten Gerät** (Dialog, einmalige Android-Erlaubnis, Installation über die alte Version). Die Serverseite ist geprüft, der Ablauf auf dem Handy noch nicht.
 - **Hersteller-Energiesparmodi** (Samsung, Xiaomi, Huawei …), die Hintergrunddienste beenden können.
