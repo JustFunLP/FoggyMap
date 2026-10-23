@@ -168,9 +168,10 @@ test('cloudflare worker entry point works against D1 semantics', async () => {
   assert.equal(missing.status, 500);
 });
 
-test('contract: reveal items produced by the Android core are accepted and returned unchanged', async () => {
+for (const fixture of ['client-items.json', 'client-items-tiles.json'])
+test(`contract: reveal items produced by the Android core are accepted and returned unchanged (${fixture})`, async () => {
   const { readFileSync } = await import('node:fs');
-  const items = JSON.parse(readFileSync(new URL('./fixtures/client-items.json', import.meta.url), 'utf8'));
+  const items = JSON.parse(readFileSync(new URL(`./fixtures/${fixture}`, import.meta.url), 'utf8'));
   const { call } = client();
   const { code } = (await call('POST', '/v2/groups', { name: 'Vertrag' })).body;
   let added = 0;

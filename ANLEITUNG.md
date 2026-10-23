@@ -21,9 +21,11 @@ Alles hier geht im Browser bzw. der GitHub-App auf dem Android-Handy. Ein PC ist
    - Benachrichtigungen: **Zulassen** (zeigt, dass aufgezeichnet wird).
 3. Losgehen, -radeln oder -fahren. Sobald du eine Straße betrittst, verschwindet der Nebel über dem ganzen Abschnitt bis zur nächsten Kreuzung und über den angrenzenden Häuserblöcken.
 4. Das Handy darf in die Tasche, der Bildschirm darf aus sein. Beenden über **„Erkundung beenden“** oder in der Benachrichtigung.
+5. **Standort-Knopf** (unten rechts über der Karte): Ein Tipp fixiert die Karte auf dich und dreht deine Blickrichtung nach oben (beim Rad- und Autofahren die Fahrtrichtung). Verschiebst du die Karte mit dem Finger, löst sich das. Zoomen geht, ohne dass es sich löst. 3D-Neigung an/aus: ⚙ → Darstellung.
 
 **Tipps**
-- Beim ersten Start in einer neuen Gegend lädt die App die Straßen (ca. 1 km² pro Kachel). Danach geht das auch offline.
+- Dein Weg erscheint sofort als Leuchtspur. Die Straßendaten kommen nach ein, zwei Sekunden, dann löst sich der Nebel über der Straße auf.
+- Beim Erkunden lädt die App die Umgebung im Hintergrund (im WLAN die ganze Stadt, ca. 8 km). Wer vorab alles will: ⚙ → **Offline-Karte → Ganze Stadt herunterladen**. Danach geht alles ohne Netz.
 - Ohne Internet läuft die Aufzeichnung weiter. Die Wege werden gespeichert und aufgedeckt, sobald die Kartendaten geladen werden können.
 - Samsung/Xiaomi/Huawei: Falls die Aufzeichnung im Hintergrund stoppt, in FoggyMap → ⚙ → *Akku-Optimierung* die App auf „Nicht eingeschränkt“ stellen.
 - Akku: ⚙ → *Akku & GPS* → „Ausgewogen“ (Standard) oder „Sparsam“.
@@ -83,7 +85,7 @@ Für das gemeinsame Spielen braucht ihr einen kleinen Server. Empfohlen ist **Cl
 
 | Problem | Lösung |
 |---|---|
-| „Kartendaten: … 429/504“ | Der öffentliche OpenStreetMap-Server (Overpass) ist ausgelastet. Die App versucht es automatisch erneut, deine Wege gehen nicht verloren. |
+| „Kartendaten: …“ / „Offline …“ | Kein Netz oder der Kartenserver ist kurz nicht erreichbar. Die App versucht es nach wenigen Sekunden erneut, deine Wege gehen nicht verloren. |
 | Nichts wird aufgedeckt | GPS-Genauigkeit oben in der Statuszeile prüfen. Über ±35 m (z. B. drinnen) wird absichtlich nichts aufgedeckt. |
 | Aufzeichnung stoppt im Hintergrund | ⚙ → Akku-Optimierung → „Nicht eingeschränkt“. Bei Xiaomi zusätzlich „Autostart“ erlauben. |
 | Koop: „Server nicht erreichbar“ | Server-Adresse prüfen (muss mit `https://` beginnen). Beim Cloudflare-Weg B die D1-Bindung `DB` prüfen. |

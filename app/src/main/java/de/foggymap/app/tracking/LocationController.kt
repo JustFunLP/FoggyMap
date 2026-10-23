@@ -212,9 +212,12 @@ class LocationController(private val context: Context, private val onLocations: 
             Profile.MOVING -> Params(3000, 4f, LocationRequestCompat.QUALITY_HIGH_ACCURACY, 5)
             Profile.STILL -> Params(30_000, 30f, LocationRequestCompat.QUALITY_LOW_POWER, 1)
         }
+        // GPS stays switched on between fixes shorter than ~10 s anyway, so rarer fixes save little energy
+        // but leave gaps (short streets passed by car got no fix). Saver mode saves by bigger batches
+        // (fewer wake-ups of the main processor) and longer pauses when standing.
         BatteryMode.SAVER -> when (p) {
-            Profile.FAST -> Params(4000, 20f, LocationRequestCompat.QUALITY_HIGH_ACCURACY, 8)
-            Profile.MOVING -> Params(5000, 7f, LocationRequestCompat.QUALITY_HIGH_ACCURACY, 6)
+            Profile.FAST -> Params(2000, 10f, LocationRequestCompat.QUALITY_HIGH_ACCURACY, 12)
+            Profile.MOVING -> Params(3000, 5f, LocationRequestCompat.QUALITY_HIGH_ACCURACY, 10)
             Profile.STILL -> Params(60_000, 50f, LocationRequestCompat.QUALITY_LOW_POWER, 1)
         }
     }

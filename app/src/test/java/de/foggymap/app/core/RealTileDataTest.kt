@@ -178,6 +178,60 @@ class RealTileDataTest {
         assertTrue("revealed again: $again", again.isEmpty())
     }
 
+    @Test fun sparseFixesByCarRevealTheWholeRoute() {
+        // Battery saver at 50 km/h: one fix every ~60 m along a real Berlin route of several streets.
+        val a = berlin
+        val m = a.tileModel
+        val core = inner(a)
+        val byNode = HashMap<Long, MutableList<Segment>>()
+        val cars = m.segments.filter { it.matchable && it.roadClass.vehicular && it.roadClass != RoadClass.PEDESTRIAN }
+        for (s in cars) { byNode.getOrPut(s.startNode) { ArrayList() }.add(s); byNode.getOrPut(s.endNode) { ArrayList() }.add(s) }
+        val start = cars.filter { it.roadClass == RoadClass.RESIDENTIAL && it.points.all { p -> core.contains(p) } }.maxBy { it.length }
+        val route = arrayListOf(start)
+        var node = start.endNode
+        var pts = ArrayList(start.points)
+        while (route.sumOf { it.length } < 1400 && route.size < 12) {
+            val nextOpts = (byNode[node] ?: break).filter { s -> s.id !in route.map { it.id } && s.points.all { core.contains(it) } }
+            val next = nextOpts.minByOrNull { it.length } ?: break
+            val fwd = next.startNode == node
+            pts.addAll((if (fwd) next.points else next.points.asReversed()).drop(1))
+            node = if (fwd) next.endNode else next.startNode
+            route += next
+        }
+        fun drive(spacing: Double, fill: Boolean): Set<String> {
+            val e = Explorer(emptyList()).apply { addCell(a.cell, m); gapFillEnabled = fill }
+            var t = 0L; var since = spacing
+            val got = HashSet<String>()
+            val rnd = java.util.Random(7)
+            for (i in 0 until pts.size - 1) {
+                val p = pts[i]; val q = pts[i + 1]
+                val len = Geo.distance(p, q)
+                var d = 0.0
+                while (d < len) {
+                    if (since >= spacing) {
+                        since = 0.0; t += (spacing / 14.0 * 1000).toLong()
+                        val f = d / len
+                        got += e.onFix(Fix(p.lat + (q.lat - p.lat) * f + rnd.nextGaussian() * 0.00002, p.lon + (q.lon - p.lon) * f + rnd.nextGaussian() * 0.00003,
+                            6.0, t, 14.0, Geo.bearing(p, q))).segments.map { it.id }
+                    }
+                    d += 1.0; since += 1.0
+                }
+            }
+            return got
+        }
+        val want = route.map { it.id }.toSet()
+        for (spacing in listOf(60.0, 120.0, 180.0)) {
+            val with = drive(spacing, true); val without = drive(spacing, false)
+            println("Berlin drive, fix every ${spacing.toInt()} m over ${route.size} streets (${route.sumOf { it.length }.toInt()} m): " +
+                "with gap filling ${with.intersect(want).size} (+${(with - want).size} extra), matcher alone ${without.intersect(want).size} (+${(without - want).size} extra)")
+            // 180 m (a fix every 13 s at 50 km/h) only happens when GPS drops out; then most of the way is still found.
+            val need = if (spacing <= 120.0) want.size else want.size * 2 / 3
+            assertTrue("spacing $spacing: revealed ${with.intersect(want).size} of ${want.size}", with.intersect(want).size >= need)
+            assertTrue(with.intersect(want).size >= without.intersect(want).size)
+            assertTrue("spacing $spacing: extra ${(with - want).size}", (with - want).size <= 2)
+        }
+    }
+
     @Test fun buildingTheCellIsFastEnough() {
         val times = HashMap<String, Long>()
         TileNetwork.timing = { stage, ms -> times[stage] = (times[stage] ?: 0) + ms }

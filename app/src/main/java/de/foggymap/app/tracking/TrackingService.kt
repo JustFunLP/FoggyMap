@@ -170,10 +170,7 @@ class TrackingService : Service() {
                 if (loc.hasSpeed()) loc.speed.toDouble() else null,
                 if (loc.hasBearing() && loc.hasSpeed() && loc.speed > 1f) loc.bearing.toDouble() else null)
             enqueue(fix)
-            if (fix.accuracy <= 35.0) {
-                publishTrail(fix.pos)
-                if (!areaRequested) { areaRequested = true; App.ensureArea(fix.pos) }
-            }
+            if (fix.accuracy <= 35.0) publishTrail(fix.pos)
             fix.bearing?.let { lastHeading = it }
             updateProfile(fix, loc)
         }
@@ -256,6 +253,8 @@ class TrackingService : Service() {
                                 "${SystemClock.elapsedRealtime() - t0} ms (cache=${result.fromCache})")
                         }
                         App.scope.launch { App.refreshCoverage() }
+                        // Only now the surroundings are fetched in the background – never competing with the cell you need.
+                        if (!areaRequested) { areaRequested = true; App.ensureArea(cell.core().center) }
                         explorer?.let { drain(it) }
                     }
                     is TileRepository.Result.Failed -> {

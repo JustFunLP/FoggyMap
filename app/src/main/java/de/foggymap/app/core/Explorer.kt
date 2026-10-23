@@ -15,7 +15,7 @@ data class CellKey(val x: Int, val y: Int) {
     fun tiles(): List<TileKey> = tile.neighbourhood()
 
     companion object {
-        const val MARGIN = 400.0
+        const val MARGIN = 300.0
         /** Look this far ahead in the direction of travel to load the next cell in time. */
         const val LOOKAHEAD = 300.0
         /** Without a known direction, load a neighbour only when this close to its edge. */
@@ -67,8 +67,18 @@ class Explorer(knownRoadIds: Collection<String>) {
 
     private var lastPos: LatLon? = null
 
+    private val gapFill = GapFill()
+    /** Tests can switch the gap filling off to look at the matcher alone. */
+    var gapFillEnabled = true
+    private var graph: GapFill.Graph? = null
+    private var lastGood: Fix? = null
+
+    private fun graph(): GapFill.Graph =
+        graph ?: GapFill.Graph(models.values.flatMap { it.segments }.distinctBy { it.id }).also { graph = it }
+
     fun addCell(k: CellKey, model: WorldModel) {
         models[k] = model
+        graph = null
         // Keep memory bounded (a car trip crosses many cells) – but never drop the cells around the
         // user: evict the one farthest away.
         while (models.size > MAX_CELLS) {
@@ -88,10 +98,24 @@ class Explorer(knownRoadIds: Collection<String>) {
     fun onFix(fix: Fix): Step {
         lastPos = fix.pos
         val result = matcher.process(fix) { pos, radius -> candidates(pos, radius) }
-        if (result.newlyConfirmed.isEmpty()) return Step(result, emptyList(), emptyList())
+        // Sparse fixes (battery saver, batching, fast driving): fill the way between them along the streets.
+        val filled = ArrayList<Segment>()
+        if (result.accepted) {
+            // Only between two fixes that both clearly belong to a movement (never GPS jitter while standing).
+            if (result.moving && fix.accuracy <= 25.0) {
+                val prev = lastGood
+                if (prev != null && gapFillEnabled)
+                    gapFill.fill(prev, fix, result.mode == TravelMode.CAR, graph()) { p, r -> candidates(p, r) }
+                        .filterTo(filled) { it.matchable && it.id !in revealedSegments }
+                lastGood = fix
+            } else lastGood = null
+        }
+        if (filled.isNotEmpty()) matcher.markKnown(filled.map { it.id })
+        val confirmed = result.newlyConfirmed + filled
+        if (confirmed.isEmpty()) return Step(result, emptyList(), emptyList())
         val items = LinkedHashMap<String, RevealItem>()
         val segs = ArrayList<Segment>()
-        for (s in result.newlyConfirmed) {
+        for (s in confirmed) {
             if (!revealedSegments.add(s.id)) continue
             val model = bestModelFor(s) ?: continue
             val local = model.segmentById[s.id] ?: continue

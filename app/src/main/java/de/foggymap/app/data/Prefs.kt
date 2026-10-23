@@ -7,7 +7,7 @@ import java.security.SecureRandom
 enum class BatteryMode(val label: String, val description: String) {
     PRECISE("Präzise", "Häufige GPS-Updates – am genauesten, höchster Verbrauch"),
     BALANCED("Ausgewogen", "Passt die GPS-Rate an dein Tempo an, pausiert GPS im Stillstand"),
-    SAVER("Sparsam", "Seltenere Updates und gebündelte Lieferung – ideal für lange Touren");
+    SAVER("Sparsam", "Positionen werden gesammelt und gebündelt geliefert, längere GPS-Pausen im Stillstand – ideal für lange Touren");
 }
 
 class Prefs(context: Context) {

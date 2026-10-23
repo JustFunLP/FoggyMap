@@ -50,6 +50,8 @@ class MapMatcher(private val cfg: Config = Config()) {
         val countedDistance: Double = 0.0,
         val speed: Double = 0.0,
         val mode: TravelMode = TravelMode.STILL,
+        /** Clear movement (jitter averaged out) – not just a noisy position. */
+        val moving: Boolean = false,
     )
 
     private class Evidence(var weight: Double, var lastMs: Long)
@@ -121,7 +123,8 @@ class MapMatcher(private val cfg: Config = Config()) {
 
         // Samples: interpolated points for gaps at speed, then the real fix.
         val samples = ArrayList<Triple<LatLon, Double, Double>>() // pos, weight, accuracy
-        if (moving && prev != null && dist > 15 && dist < 400 && dt <= 45) {
+        // Longer gaps are filled along the street graph instead (GapFill) – a straight line would cut corners.
+        if (moving && prev != null && dist > 15 && dist < 70 && dt <= 45) {
             val n = (dist / cfg.interpolationStep).toInt()
             for (i in 1 until n) {
                 val t = i.toDouble() / n
@@ -141,7 +144,8 @@ class MapMatcher(private val cfg: Config = Config()) {
         val newly = ArrayList<Segment>()
         for ((pos, weight, acc) in samples) {
             val radius = (acc * 1.3 + 4.0).coerceIn(12.0, 32.0)
-            val cands = candidates(pos, radius)
+            // At car speed footpaths and cycle tracks cannot be what we are on.
+            val cands = candidates(pos, radius).let { c -> if (smoothedSpeed > 9.0) c.filter { it.segment.roadClass.vehicular } else c }
             if (cands.isEmpty()) continue
             val scored = cands.map { c -> c to score(c, heading) }.sortedBy { it.second }
             val (best, bestScore) = scored[0]
@@ -179,10 +183,10 @@ class MapMatcher(private val cfg: Config = Config()) {
             }
         }
         evidence.entries.removeAll { fix.timeMs - it.value.lastMs > cfg.evidenceTtlMs }
-        return accept(fix, lastMatched, dist, smoothedSpeed, newly, "ok")
+        return accept(fix, lastMatched, dist, smoothedSpeed, newly, "ok", moving)
     }
 
-    private fun accept(fix: Fix, current: Segment?, dist: Double, speed: Double, newly: List<Segment>, reason: String): Result {
+    private fun accept(fix: Fix, current: Segment?, dist: Double, speed: Double, newly: List<Segment>, reason: String, moving: Boolean = false): Result {
         last = fix
         // Distance statistics: only count movement that clearly exceeds GPS jitter.
         // A move is only counted once two consecutive fixes are away from the anchor (single outliers are jitter).
@@ -196,7 +200,7 @@ class MapMatcher(private val cfg: Config = Config()) {
                 if (awayCount++ >= 1) { counted = d; distanceAnchor = fix.pos; awayCount = 0 }
             } else awayCount = 0
         }
-        return Result(true, reason, newly, current, counted, speed, modeFor(speed))
+        return Result(true, reason, newly, current, counted, speed, modeFor(speed), moving)
     }
 
     private fun score(c: Candidate, heading: Double?): Double {

@@ -78,6 +78,7 @@ import de.foggymap.app.core.TravelMode
 import de.foggymap.app.data.RevealDatabase
 import de.foggymap.app.tracking.TrackingService
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class Sheet { NONE, STATS, GROUP, SETTINGS }
@@ -156,6 +157,8 @@ fun MainScreen(activity: MainActivity) {
             ?: withContext(Dispatchers.IO) { App.db.lastPosition() }?.let { LatLon(it.first, it.second) }
         if (start != null) c.moveTo(start, 16.6, perspective, animate = false)
         else c.moveTo(LatLon(51.1657, 10.4515), 5.0, false, animate = false)
+        // Prepare the street data where you are now, so exploring starts without waiting.
+        if (start != null) App.scope.launch { App.tiles.load(de.foggymap.app.core.CellKey.of(start)) }
         c.requestRefresh(start)
     }
     LaunchedEffect(controller, dbVersion) { controller?.requestRefresh(location?.let { LatLon(it.latitude, it.longitude) }) }

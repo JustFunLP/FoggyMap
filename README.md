@@ -16,11 +16,12 @@ app/src/main/java/de/foggymap/app/
     RoadNetwork.kt   OSM-Wege → Straßenabschnitte zwischen echten Kreuzungen
     WorldModel.kt    Häuserblöcke (planarer Graph), Aufdeck-Regeln, Gebäude
     MapMatcher.kt    GPS → Straßenabschnitt (Filter, Richtung, Entprellung)
-    Explorer.kt      Kartenkacheln + Matching + Aufdecken, offline-fähig
+    Explorer.kt      Kartenzellen + Matching + Aufdecken, offline-fähig
+    Mvt.kt, TileNetwork.kt  Vektorkachel-Decoder und Straßennetz aus Kacheln
     FogBuilder.kt    Vereinigung aller Funde → Nebel-GeoJSON (inkrementell)
     RevealSet.kt     Grow-only-Set (konfliktfreie Zusammenführung)
     Invite.kt        Gruppencodes und Einladungstexte
-  data/        SQLite-Speicher, Overpass-Download + Offline-Cache, Koop-Sync
+  data/        SQLite-Speicher, Kachel-Download + Offline-Speicher, Koop-Sync
   tracking/    Vordergrunddienst, akkusparende Standortsteuerung
   ui/          Jetpack Compose + MapLibre (3D-Karte, Nebel, Animationen)
 server/        Koop-Server: gemeinsame Logik für Cloudflare Worker (D1) und Node.js (SQLite)
@@ -32,8 +33,8 @@ scripts/       Emulator-End-to-End-Test (simulierte GPS-Route)
 
 ## Wie das Aufdecken funktioniert
 
-1. **Kartendaten:** Für eine Kachel von ca. 0,9 × 0,9 km (plus 350 m Rand) lädt die App über die Overpass-API alle Straßen, Bahnlinien, Flüsse und Gebäude. Die Kachel wird dauerhaft gespeichert und funktioniert danach offline.
-2. **Straßenabschnitte:** Ein OSM-Weg wird an jedem Knoten geteilt, den er mit einer anderen *Straße* teilt. Einmündende Fußwege teilen eine Straße nicht. Brücken und Tunnel kreuzen ohne gemeinsamen Knoten und bilden deshalb keine Kreuzung. Sehr lange Landstraßen werden nach 900 m gestückelt. Gehwege (`footway=sidewalk`), Zufahrten und private Wege werden ignoriert. Die ID eines Abschnitts (Weg + Endknoten) ist kachelübergreifend stabil.
+1. **Kartendaten:** Straßen, Bahnlinien, Flüsse und Gebäude kommen aus denselben Vektorkacheln (OpenFreeMap, Zoomstufe 14, ca. 1,5 × 1,5 km), die auch die Karte zeigt. Eine Kachel hat 50–500 KB und kommt vom CDN in Sekundenbruchteilen. Das Straßennetz einer Zelle wird aus ihrer Kachel und den 8 Nachbarkacheln gebaut. Beim Erkunden lädt die App die Umgebung im Hintergrund (WLAN: ca. 8 km, mobil: ca. 3 km), in den Einstellungen auch die ganze Stadt (12 km). Alles bleibt offline gespeichert. Höchstens 4 parallele Anfragen und eine eigene App-Kennung, wie OpenFreeMap es für Offline-Downloads verlangt.
+2. **Straßenabschnitte:** Vektorkacheln haben keine OSM-Knoten und schneiden Linien am Kachelrand ab. Die App fügt die Stücke über die Kachelränder wieder zusammen und findet Kreuzungen geometrisch: gemeinsame Punkte, Einmündungen (T) und Kreuzungen auf gleicher Ebene. Brücken und Tunnel verbinden sich nur an ihren Enden. Straßenstücke, die nur weiterlaufen (in OSM z. B. wegen eines Belagwechsels geteilt), werden verbunden, sodass ein Abschnitt wirklich von Kreuzung zu Kreuzung reicht. Einmündende Fußwege teilen eine Straße nicht. Sehr lange Landstraßen werden nach 900 m gestückelt. Separat eingezeichnete Gehwege (laufen 1–16 m neben einer Straße in gleicher Richtung), Zebrastreifen, Zufahrten und Parkplatzgassen werden ignoriert. Die ID eines Abschnitts wird aus den Koordinaten der Endkreuzungen berechnet und ist auf allen Handys und in allen Zellen gleich. Abgleich mit Overpass (Odenthal, Berlin): 100 % der Kreuzungen gefunden, keine Straße fehlt, Blockanzahl ±3 %.
 3. **Häuserblöcke:** Alle Fahrstraßen ohne Brücken und Tunnel, dazu Bahnlinien und Flüsse, werden verknotet (JTS `UnaryUnion`) und polygonisiert. Die Flächen dazwischen sind die Blöcke.
    Ein Block gilt als angrenzend, wenn **mindestens die Hälfte des Abschnitts (max. 25 m) auf seinem Rand liegt**. So bleiben Blöcke, die nur die Kreuzung berühren, verdeckt. Dasselbe gilt für Blöcke hinter einer Parallelstraße.
    Sicherheitsnetze: Blöcke > 5 ha (Industrie, Parks, Felder) und Blöcke am unsicheren Kachelrand werden nur als 40 m tiefer Streifen aufgedeckt. Ein Fußweg in einem Park deckt einen 25-m-Streifen auf. Gibt es keine geschlossenen Blöcke (Dorf, Landstraße), werden die Häuser bis 30 m neben der Straße sichtbar, aber nur, wenn keine andere Straße dazwischen liegt.
@@ -41,7 +42,7 @@ scripts/       Emulator-End-to-End-Test (simulierte GPS-Route)
 4. **GPS-Zuordnung:** Positionen ungenauer als ±35 m und Sprünge über 250 km/h werden verworfen. Gesucht wird in einem Radius, der von der Genauigkeit abhängt. Die Bewertung berücksichtigt den Abstand, die Bewegungsrichtung gegenüber der Straßenachse und die Fortsetzung des bisherigen Abschnitts.
    Ist ein anderer Abschnitt fast gleich gut (Parallelstraße, Kreuzung), zählt nichts. Ein Abschnitt braucht mindestens zwei Belege, und in der Kreuzungszone zählt nur eindeutige Bewegung entlang der Straße.
    Im Stand wird über die letzten 20 s gemittelt, damit GPS-Zittern an einer Kreuzung keine Seitenstraßen freischaltet. Schnelle Fahrten werden zwischen zwei Positionen interpoliert, damit auch 30 m kurze Abschnitte erkannt werden.
-5. **Offline:** Positionen ohne geladene Kartenkachel landen in einer gespeicherten Warteschlange und werden später in zeitlicher Reihenfolge nachträglich ausgewertet.
+5. **Offline / Sofortanzeige:** Dein Weg erscheint sofort als Leuchtspur, auch bevor die Straße zugeordnet ist. Positionen ohne geladene Kartendaten landen in einer gespeicherten Warteschlange und werden in zeitlicher Reihenfolge nachträglich ausgewertet. Mit der alten Datenquelle aufgedeckte Straßen werden geometrisch wiedererkannt und nicht doppelt gezählt.
 
 ## Koop-Synchronisierung
 
@@ -75,6 +76,6 @@ Lokal (mit PC): `gradle :app:testDebugUnitTest :app:assembleRelease`. Server: `c
 
 ## Datenquellen und Lizenzen
 
-Karten- und Straßendaten © OpenStreetMap-Mitwirkende (ODbL). Vektorkacheln von OpenFreeMap / OpenMapTiles. Straßenabfrage über die öffentliche Overpass-API.
-Die öffentlichen Dienste haben Fair-Use-Regeln. Für private Nutzung in kleinen Gruppen ist das unproblematisch, für eine breite Veröffentlichung sollte ein eigener Overpass- bzw. Kachelserver eingerichtet werden.
+Karten- und Straßendaten © OpenStreetMap-Mitwirkende (ODbL). Vektorkacheln von OpenFreeMap / OpenMapTiles.
+OpenFreeMap erlaubt App-Downloads für die Offline-Nutzung bis 3.000 Kacheln bzw. 50 MB pro Download mit höchstens 4 parallelen Anfragen. FoggyMap hält sich daran. Für eine breite Veröffentlichung sollte man mit OpenFreeMap sprechen oder eigene Kacheln hosten.
 Kartendarstellung: MapLibre Native (BSD). Geometrie: JTS (EPL/EDL). Die Testdaten in `app/src/test/resources` sind ein OSM-Auszug von Helsinki (ODbL).

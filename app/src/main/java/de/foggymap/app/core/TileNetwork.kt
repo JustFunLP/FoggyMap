@@ -102,7 +102,7 @@ object TileNetwork {
 
     fun build(tiles: Map<TileKey, Map<String, Mvt.Layer>>, box: BBox): Output {
         val mpu = TileMath.metersPerUnit(box.center.lat)
-        val keep = TileMath.envelope(box).also { it.expandBy(250.0 / mpu) }
+        val keep = TileMath.envelope(box).also { it.expandBy(150.0 / mpu) }
         val pieces = ArrayList<Piece>()
         val names = ArrayList<Pair<DoubleArray, String>>()
         for ((t, layers) in tiles) {

@@ -103,11 +103,13 @@ object RoadNetworkBuilder {
                 if (line.length < 0.5) continue
                 val pieces = if (line.length <= MAX_SEGMENT_LENGTH) listOf(pts to line)
                     else chunk(pts, line, proj, gf)
+                // Chunk boundaries get their own node ids so consecutive chunks stay connected.
+                fun chunkNode(k: Int) = -((baseId.hashCode().toLong() and 0x7fffffffL) * 4096 + k + 2)
                 pieces.forEachIndexed { k, (p, l) ->
                     out.add(Segment(
                         id = if (pieces.size == 1) baseId else "$baseId:$k",
                         wayId = w.id, roadClass = r.cls, name = w.tags["name"], points = p, line = l,
-                        startNode = if (k == 0) a else -1, endNode = if (k == pieces.lastIndex) b else -1,
+                        startNode = if (k == 0) a else chunkNode(k), endNode = if (k == pieces.lastIndex) b else chunkNode(k + 1),
                         complete = complete, elevated = elevated, tunnel = tunnel,
                     ))
                 }

@@ -31,7 +31,10 @@ import org.maplibre.android.style.expressions.Expression.interpolate
 import org.maplibre.android.style.expressions.Expression.lineProgress
 import org.maplibre.android.style.expressions.Expression.linear
 import org.maplibre.android.style.expressions.Expression.literal
+import org.maplibre.android.style.expressions.Expression.max
 import org.maplibre.android.style.expressions.Expression.product
+import org.maplibre.android.style.expressions.Expression.subtract
+import org.maplibre.android.style.expressions.Expression.sum
 import org.maplibre.android.style.expressions.Expression.stop
 import org.maplibre.android.style.expressions.Expression.zoom
 import org.maplibre.android.style.layers.CircleLayer
@@ -60,6 +63,7 @@ import org.maplibre.android.style.layers.PropertyFactory.fillExtrusionBase
 import org.maplibre.android.style.layers.PropertyFactory.fillExtrusionColor
 import org.maplibre.android.style.layers.PropertyFactory.fillExtrusionHeight
 import org.maplibre.android.style.layers.PropertyFactory.fillExtrusionOpacity
+import org.maplibre.android.style.layers.PropertyFactory.fillExtrusionPattern
 import org.maplibre.android.style.layers.PropertyFactory.fillExtrusionVerticalGradient
 import org.maplibre.android.style.layers.PropertyFactory.fillOpacity
 import org.maplibre.android.style.layers.PropertyFactory.fillPattern
@@ -137,17 +141,21 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
             lineWidth(interpolate(linear(), zoom(), stop(12, 4f), stop(18, 16f))), lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
         add(LineLayer(L_TRAIL, SRC_TRAIL).withProperties(lineGradient(trailFade),
             lineWidth(interpolate(linear(), zoom(), stop(12, 1.2f), stop(18, 3.6f))), lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
-        // Revealed buildings in 3D.
-        // Night-city buildings: blue-violet walls that get brighter with height, lit by the warm style light.
-        val buildingColor = interpolate(linear(), get("h"),
-            stop(0, color(Color.rgb(52, 58, 112))), stop(10, color(Color.rgb(66, 70, 140))),
-            stop(25, color(Color.rgb(88, 84, 172))), stop(60, color(Color.rgb(122, 104, 214))))
-        add(FillExtrusionLayer(L_BLDG, SRC_BLDG).withProperties(fillExtrusionColor(buildingColor),
-            fillExtrusionHeight(get("h")), fillExtrusionBase(get("mh")), fillExtrusionOpacity(0.94f),
+        // Revealed buildings in 3D as a night city: facades with lit windows, dark flat roofs on top.
+        // Every building is at least ~8 m high, so houses without height data still read as 3D.
+        style.addImage(IMG_WINDOWS, WindowTexture.create())
+        add(FillExtrusionLayer(L_BLDG, SRC_BLDG).withProperties(fillExtrusionPattern(IMG_WINDOWS),
+            fillExtrusionHeight(shownHeight()), fillExtrusionBase(get("mh")), fillExtrusionOpacity(1f),
             fillExtrusionVerticalGradient(true)).also { it.minZoom = 13.5f })
-        add(FillExtrusionLayer(L_BLDG_NEW, SRC_BLDG_NEW).withProperties(fillExtrusionColor(buildingColor),
-            fillExtrusionHeight(product(get("h"), literal(0f))), fillExtrusionBase(get("mh")), fillExtrusionOpacity(0.96f),
+        add(FillExtrusionLayer(L_BLDG_ROOF, SRC_BLDG).withProperties(fillExtrusionColor(ROOF),
+            fillExtrusionHeight(sum(shownHeight(), literal(0.6f))), fillExtrusionBase(subtract(shownHeight(), literal(0.4f))),
+            fillExtrusionOpacity(1f), fillExtrusionVerticalGradient(false)).also { it.minZoom = 13.5f })
+        add(FillExtrusionLayer(L_BLDG_NEW, SRC_BLDG_NEW).withProperties(fillExtrusionPattern(IMG_WINDOWS),
+            fillExtrusionHeight(literal(0f)), fillExtrusionBase(get("mh")), fillExtrusionOpacity(1f),
             fillExtrusionVerticalGradient(true)).also { it.minZoom = 13.5f })
+        add(FillExtrusionLayer(L_BLDG_NEW_ROOF, SRC_BLDG_NEW).withProperties(fillExtrusionColor(ROOF),
+            fillExtrusionHeight(literal(0f)), fillExtrusionBase(literal(0f)),
+            fillExtrusionOpacity(1f), fillExtrusionVerticalGradient(false)).also { it.minZoom = 13.5f })
         // Reveal animation: fog dissolving over the new area, plus an expanding violet glow.
         add(FillLayer(L_DISSOLVE, SRC_FLASH).withProperties(fillColor(FOG), fillOpacity(0f)))
         add(FillLayer(L_DISSOLVE_CLOUDS, SRC_FLASH).withProperties(fillPattern(IMG_CLOUDS), fillOpacity(0f)))
@@ -161,6 +169,9 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         installPuck()
         scope.launch { for (hint in pending) runCatching { refresh(hint) }.onFailure { android.util.Log.e(TAG, "fog refresh failed", it) } }
     }
+
+    /** Shown building height: at least 7 m (OpenMapTiles uses 5 m when OSM has no height), slightly exaggerated. */
+    private fun shownHeight() = product(max(get("h"), literal(7f)), literal(1.15f))
 
     /** Diagnostics for debug builds / the emulator test. */
     fun debugState(): String {
@@ -179,8 +190,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
 
     fun setBuildingsVisible(v: Boolean) {
         val vis = if (v) Property.VISIBLE else Property.NONE
-        style.getLayer(L_BLDG)?.setProperties(visibility(vis))
-        style.getLayer(L_BLDG_NEW)?.setProperties(visibility(vis))
+        for (id in listOf(L_BLDG, L_BLDG_ROOF, L_BLDG_NEW, L_BLDG_NEW_ROOF)) style.getLayer(id)?.setProperties(visibility(vis))
     }
 
     /** Requests a fog update (new database rows). Cheap to call often – requests are merged. */
@@ -239,7 +249,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         source(SRC_BLDG_NEW)?.setGeoJson(r.newBuildings ?: FogBuilder.EMPTY)
         revealAnim?.cancel()
         val dissolve = style.getLayer(L_DISSOLVE); val clouds = style.getLayer(L_DISSOLVE_CLOUDS)
-        val flash = style.getLayer(L_FLASH); val rising = style.getLayer(L_BLDG_NEW)
+        val flash = style.getLayer(L_FLASH); val rising = style.getLayer(L_BLDG_NEW); val risingRoof = style.getLayer(L_BLDG_NEW_ROOF)
         revealAnim = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 1800
             interpolator = DecelerateInterpolator(1.6f)
@@ -249,7 +259,9 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
                 clouds?.setProperties(fillOpacity(0.9f * (1 - t) * (1 - t)))
                 flash?.setProperties(lineOpacity(if (t < 0.15f) t / 0.15f else (1 - t) / 0.85f), lineWidth(2f + 14f * t))
                 val rise = ((t - 0.25f) / 0.75f).coerceIn(0f, 1f)
-                rising?.setProperties(fillExtrusionHeight(product(get("h"), literal(rise))))
+                val h = product(shownHeight(), literal(rise))
+                rising?.setProperties(fillExtrusionHeight(h))
+                risingRoof?.setProperties(fillExtrusionHeight(sum(h, literal(0.6f))), fillExtrusionBase(subtract(h, literal(0.4f))))
             }
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
@@ -492,6 +504,8 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         const val L_ROADS = "explored"; const val L_BLDG = "bldg-3d"; const val L_BLDG_NEW = "bldg-3d-new"
         const val L_DISSOLVE = "reveal-dissolve"; const val L_DISSOLVE_CLOUDS = "reveal-dissolve-clouds"; const val L_FLASH = "reveal-flash"
         const val L_FRIENDS = "friends"; const val L_FRIENDS_LABEL = "friends-label"
+        const val IMG_WINDOWS = "windows"; const val ROOF = "#1a1c38"
+        const val L_BLDG_ROOF = "bldg-roof"; const val L_BLDG_NEW_ROOF = "bldg-new-roof"
         const val SRC_TRAIL = "trail"; const val L_TRAIL = "trail"; const val L_TRAIL_GLOW = "trail-glow"
         const val IMG_PUCK = "me-arrow"; const val SRC_ME = "me"; const val L_ME = "me-arrow"; const val L_ME_GLOW = "me-glow"
     }
