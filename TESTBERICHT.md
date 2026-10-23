@@ -14,7 +14,7 @@ Stand: 23.10.2026. Alle Ergebnisse stammen aus echten Läufen, die du jederzeit 
 
 ## ✅ Automatisch getestet
 
-**1. Kernlogik (63 Unit-Tests, laufen bei jedem Build)**
+**1. Kernlogik (70 Unit-Tests, laufen bei jedem Build)**
 - Straßenaufteilung: Teilung an Kreuzungen, Fußwege teilen keine Straßen, Brücken bilden keine Kreuzung, Gehwege und Zufahrten werden ignoriert, lange Landstraßen werden gestückelt, die IDs sind kachelübergreifend stabil.
 - **Straßennetz aus Vektorkacheln (neu, ersetzt Overpass):** Mit künstlich erzeugten Kacheln (Schnitt an Kachelrändern, weggekürzte Kreuzungspunkte) und mit **echten OpenFreeMap-Kacheln** aus Odenthal (Dorf) und Berlin-Prenzlauer Berg, verglichen mit den Overpass-Daten derselben Gegend vom selben Tag:
   - 62 von 62 bzw. 65 von 65 echten Kreuzungen gefunden, keine Straße fehlt.
@@ -28,6 +28,7 @@ Stand: 23.10.2026. Alle Ergebnisse stammen aus echten Läufen, die du jederzeit 
 - GPS-Jitter: 15 Zufallsläufe mit 0 Fehlaufdeckungen beim Stehen an einer Kreuzung (±7 m Streuung, 2,5 min), 0 Fehlaufdeckungen einer nur 20 m entfernten Parallelstraße und 0 verpasste Straßen. Ungenaue Positionen (±60 m) und GPS-Sprünge werden verworfen. Bei Autotempo zählen Fuß- und Radwege nicht.
 - Offline-Erkundung: Fortschritt übersteht den Neustart ohne Duplikate.
 - Zusammenführung zweier Nutzer: Vereinigung ohne Verlust und ohne Duplikate, unabhängig von der Reihenfolge, Wiederholungen sind folgenlos.
+- **Koop ohne Server (neu):** Die Signaturen (BIP-340) bestehen alle 19 offiziellen Testvektoren. Ereignisse werden exakt nach NIP-01 serialisiert, signiert und geprüft, eine veränderte Nachricht fällt durch. Nur wer den Gruppencode kennt, kann die Daten lesen: Mit einem anderen Code oder bei manipulierten Daten kommt nichts heraus. Auch über 1.000 Funde passen in Pakete unter 60 KB, und neue Funde ändern nur das letzte Paket.
 
 **2. Koop-Server (11 Tests)**
 Gruppencodes, idempotenter Upload, Zusammenführung zweier Spieler, Seitenweises Laden, 10 gleichzeitige Uploads ohne Duplikate, Abwehr ungültiger Eingaben, Ratenbegrenzung bei Code-Raten, Live-Position (Opt-in, Ablauf nach 10 min), HTTP-Ende-zu-Ende, Cloudflare-Worker-Code gegen D1-Semantik.
@@ -46,7 +47,12 @@ Menü (Erkunden, Koop mit und ohne Gruppe, App) und die Kartenansicht (Kopfzeile
 **5. Aufdeck-Modi (Unit-Tests)**
 Häuserblöcke, Straßenzug (einstellbare Breite, endet an der nächsten Straße) und Umkreis (Radius um den GPS-Weg, ohne Kartendaten, im Stillstand kaum neue Flächen). Eine Straße mit Block auf einer Seite und offenem Land auf der anderen zeigt beide Seiten. Sehr große Blöcke zeigen nur die Häuser an der Straße.
 
-**6. Aussehen der 3D-Karte (Vorschau)**
+**6. Koop über echte öffentliche Relays (bei jedem Build)**
+Der Build-Test spricht mit den echten Relays im Internet, nicht mit einer Attrappe:
+- **Relay-Prüfung:** 12 öffentliche Relays wurden getestet, ob sie 25-KB- und 50-KB-Pakete annehmen und wieder herausgeben. 7 schafften beides. Die App nutzt fünf davon: nos.lol, relay.primal.net, nostr.mom, relay.snort.social und nostr-pub.wellorder.net. Aussortiert: Relays, die nur „Web-of-Trust“-Nutzer annehmen, nicht erreichbare und eines, das Daten zwar annimmt, aber nicht zurückgibt.
+- **Zwei Mitglieder, echte Relays:** Anna erstellt eine Gruppe und veröffentlicht 540 Funde in 3 Paketen. Ben findet die Gruppe „CI-Gruppe“ nur über den Code und erhält alle 540. Anna erhält Bens 30 Funde. Beide sehen sich als Mitglieder, Bens eingeschalteter Live-Standort ist bei Anna sichtbar. Eine zweite Runde ohne neue Funde sendet nichts. Dauer: 12 s.
+
+**7. Aussehen der 3D-Karte (Vorschau)**
 Die neuen 3D-Gebäude (Fassaden mit beleuchteten Fenstern, dunkle Dächer, mindestens ca. 8 m hoch) wurden mit denselben Berliner Kacheln, demselben Kartenstil und denselben Nebel- und Gebäudedaten in MapLibre GL JS (Browser) gerendert und begutachtet. Auf dem Handy rendert MapLibre Native. Das sollte gleich aussehen, ist aber nicht auf einem echten Gerät geprüft.
 
 ## ⚠️ Nicht getestet (konnte ich ohne echtes Handy nicht prüfen)
@@ -57,13 +63,16 @@ Die neuen 3D-Gebäude (Fassaden mit beleuchteten Fenstern, dunkle Dächer, minde
 - **Ladezeit der ersten Kartenzelle auf einem echten Handy** (PC 0,15 s, langsamer CI-Emulator 2–14 s).
 - **Selbst-Update auf einem echten Gerät** (Dialog, einmalige Android-Erlaubnis, Installation über die alte Version). Die Serverseite ist geprüft, der Ablauf auf dem Handy noch nicht.
 - **Hersteller-Energiesparmodi** (Samsung, Xiaomi, Huawei …), die Hintergrunddienste beenden können.
-- **Cloudflare-Einrichtung mit deinem Konto**. Workflow und Worker sind getestet, die Einrichtung mit deinem Konto nicht.
-- **Zwei echte Handys gleichzeitig.** Getestet sind App ↔ echter Server im Emulator sowie zwei Spieler in den Server-Tests.
+- **Koop auf zwei echten Handys.** Getestet ist die Koop-Logik mit zwei simulierten Mitgliedern gegen die echten Relays (siehe 6). Der Emulator-Test oben lief noch gegen einen eigenen Testserver. Wie oft ein Handy-Netz (z. B. Firmen-WLAN) WebSocket-Verbindungen blockiert, ist nicht geprüft.
+- **Wie lange die Relays Daten aufbewahren.** Öffentliche Relays geben keine Garantie. Deshalb schreibt die App an fünf gleichzeitig, und jedes Handy behält alle Funde (eigene und die der Gruppe) lokal. Fallen alle Relays aus oder löschen sie, gehen für neue Mitglieder ältere Funde verloren, nicht aber für bestehende.
+- **Datenverbrauch des Koop-Modus** im Alltag. Rechnerisch: pro Sync meist ein Paket von ca. 13 KB an fünf Relays plus das Abholen neuer Pakete.
+- **Eigener Koop-Server mit deinem Cloudflare-Konto** (optional). Workflow und Worker sind getestet, die Einrichtung mit deinem Konto nicht.
 - Andere Android-Versionen als 14 (Mindestversion 8.0) und schwache Geräte.
 - Die Darstellung der Hintergrundkarte (OpenFreeMap-Kacheln) im Emulator: Die Software-Grafik im CI ist sehr langsam.
 
 ## Bekannte Grenzen
 
+- Koop über öffentliche Relays ist kostenlos, aber ohne Garantie (siehe oben). Die Relay-Betreiber sehen eure IP-Adressen und wann ihr synchronisiert, aber keine Inhalte. Wer das nicht möchte, kann einen eigenen Server einrichten (ANLEITUNG Abschnitt 4).
 - Kartendaten kommen von OpenFreeMap (kostenloser Dienst ohne Garantie). Fällt er aus, läuft die Aufzeichnung weiter und wird nachträglich aufgedeckt. Bereits geladene Gebiete funktionieren offline.
 - Vektorkacheln kennen keine OSM-Kennzeichnung für Gehwege. Gehwege werden an ihrer Lage erkannt (parallel 1–16 m neben einer Straße). Ein echter Fußweg direkt neben einer Straße wird dadurch ebenfalls ausgeblendet. Die Straße daneben deckt diese Fläche aber ohnehin auf.
 - Gebäudehöhen stammen aus OpenStreetMap. Ohne Höhenangabe wird ein Haus mit ca. 8 m gezeigt.

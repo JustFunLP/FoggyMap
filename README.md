@@ -2,9 +2,9 @@
 
 Android-App: Die Welt liegt unter Nebel, und nur wo du selbst unterwegs warst, wird die Karte sichtbar.
 Sie deckt immer ganze Straßenabschnitte bis zur nächsten Kreuzung auf, zusammen mit den angrenzenden Häuserblöcken, und zeigt sie als dunkle 3D-Stadtkarte.
-Im Koop-Modus erkundet ihr zu mehreren dieselbe Karte.
+Im Koop-Modus erkundet ihr zu mehreren dieselbe Karte, direkt aus der App heraus, ohne eigenen Server.
 
-**➡ Bedienung, Installation und Server-Einrichtung (nur mit dem Handy): [ANLEITUNG.md](ANLEITUNG.md)**
+**➡ Bedienung, Installation und Koop (nur mit dem Handy): [ANLEITUNG.md](ANLEITUNG.md)**
 
 ---
 
@@ -21,14 +21,15 @@ app/src/main/java/de/foggymap/app/
     FogBuilder.kt    Vereinigung aller Funde → Nebel-GeoJSON (inkrementell)
     RevealSet.kt     Grow-only-Set (konfliktfreie Zusammenführung)
     Invite.kt        Gruppencodes und Einladungstexte
+    Schnorr.kt, Nostr.kt  Nostr-Signaturen (BIP-340), Ereignisse, Gruppenverschlüsselung
   data/        SQLite-Speicher, Kachel-Download + Offline-Speicher, Koop-Sync
   tracking/    Vordergrunddienst, akkusparende Standortsteuerung
   ui/          Jetpack Compose + MapLibre (3D-Karte, Nebel, Animationen)
-server/        Koop-Server: gemeinsame Logik für Cloudflare Worker (D1) und Node.js (SQLite)
+server/        optionaler eigener Koop-Server: Cloudflare Worker (D1) und Node.js (SQLite)
 scripts/       Emulator-End-to-End-Test (simulierte GPS-Route)
 .github/workflows/
   android.yml  Unit-Tests → signierte FoggyMap.apk → Release-Link → Emulator-Test
-  server.yml   Koop-Server per Knopfdruck auf Cloudflare einrichten
+  server.yml   optional: eigenen Koop-Server per Knopfdruck auf Cloudflare einrichten
 ```
 
 ## Wie das Aufdecken funktioniert
@@ -48,8 +49,13 @@ scripts/       Emulator-End-to-End-Test (simulierte GPS-Route)
 ## Koop-Synchronisierung
 
 - Alle Funde bilden ein **Grow-only-Set** (CRDT). Zusammenführen ist eine reine Vereinigung über die ID. Doppelte Uploads, Wiederholungen nach Netzfehlern und gleichzeitige Uploads mehrerer Spieler können nichts löschen und nichts doppelt anlegen. Das ist mit Tests belegt.
-- Die App speichert zuerst lokal (Outbox) und synchronisiert, wenn Netz da ist: nach neuen Funden (gebündelt), alle 3 Minuten während der Erkundung, beim Öffnen der App und bei Netzwechsel. Der Download läuft inkrementell über eine Server-Revision.
-- Server: 12-stellige Gruppencodes mit 60 Bit Zufall, Ratenbegrenzung (allgemein, für neue Gruppen und streng für falsche Codes), Eingabeprüfung, Größenlimits und nur HTTPS. Mitglieds-IDs werden gehasht.
+- **Standard: ohne Server über Nostr-Relays.** „Gruppe erstellen“ erzeugt den 12-stelligen Code (60 Bit Zufall) auf dem Handy. Jedes Mitglied hat einen eigenen, zufälligen Signierschlüssel (BIP-340, nur auf dem Gerät) und veröffentlicht seine Funde auf fünf öffentlichen Relays gleichzeitig (`wss://`, also TLS):
+  - Funde: ersetzbare App-Daten-Ereignisse (NIP-78, Kind 30078), je ca. 40 KB JSON, komprimiert und verschlüsselt ca. 13 KB. Neue Funde ändern nur das letzte Paket, deshalb wird pro Sync meist nur ein Paket neu gesendet.
+  - Mitgliedskarte: Anzeigename, Gruppenname, Kilometer. Wird nur bei Änderung oder alle 6 Stunden gesendet.
+  - Live-Standort: nur nach ausdrücklichem Einschalten, mit Ablaufzeit 10 Minuten (NIP-40).
+  - **Verschlüsselung:** Aus dem Gruppencode werden per PBKDF2-SHA256 (60.000 Runden) ein öffentliches Such-Kennzeichen und ein AES-256-GCM-Schlüssel abgeleitet. Die Relays sehen nur das Kennzeichen, Zeitstempel und unlesbare Daten. Wer den Code nicht kennt, kann nichts lesen und nichts unterschieben (fremde Pakete lassen sich nicht entschlüsseln und werden verworfen).
+  - Sync gebündelt: alle 2–3 Minuten während der Erkundung, beim Öffnen der App und bei Netzwechsel. Abgeholt wird inkrementell ab dem letzten Zeitstempel.
+- **Optional: eigener Server** (Cloudflare Worker + D1 oder Node.js + SQLite, siehe ANLEITUNG Abschnitt 4). Dann gilt: 12-stellige Gruppencodes, Ratenbegrenzung, Eingabeprüfung, Größenlimits und nur HTTPS. Mitglieds-IDs werden gehasht.
 - Geteilt werden nur aufgedeckte Flächen, Kilometerstände und der Anzeigename. Der **Live-Standort ist standardmäßig aus**. Er wird nur nach ausdrücklicher Bestätigung übertragen und verfällt nach 10 Minuten.
 
 ## Akku

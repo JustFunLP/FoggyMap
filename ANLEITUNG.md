@@ -36,11 +36,30 @@ Alles hier geht im Browser bzw. der GitHub-App auf dem Android-Handy. Ein PC ist
 
 ---
 
-## 3. Koop-Server einrichten (einmalig, ca. 10 Minuten)
+## 3. Mit Freunden und Kollegen spielen (Koop)
 
-Für das gemeinsame Spielen braucht ihr einen kleinen Server. Empfohlen ist **Cloudflare Workers + D1**: **kostenlos**, mit HTTPS, die Daten bleiben dauerhaft erhalten. Das Free-Kontingent (100.000 Anfragen/Tag) reicht für eine Gruppe von Kollegen um ein Vielfaches.
+Es muss **nichts eingerichtet** werden: kein Server, kein Konto, kein GitHub. Alles passiert in der App.
 
-### Weg A: automatisch per GitHub (empfohlen)
+1. **Du:** FoggyMap → oben rechts **Menü** → Reiter **Koop** → Anzeigename und Gruppenname eintragen → **Gruppe erstellen**.
+2. Es erscheint der Gruppencode. Tippe auf das **Teilen-Symbol** daneben und schicke die Einladung z. B. per WhatsApp. In der Nachricht stehen der Download-Link der App und der Code.
+3. **Freund/Kollege:** installiert die App über den Link in der Nachricht (wie in Abschnitt 1, ohne GitHub-Konto) → App öffnen → **Menü → Koop** → die Einladungsnachricht in das Feld *„Einladung einfügen“* kopieren (oder in WhatsApp lange auf die Nachricht tippen → **Teilen → FoggyMap**) → **Beitreten**.
+4. Ab jetzt sehen alle, was jeder aufdeckt. Synchronisiert wird automatisch alle 2–3 Minuten während der Erkundung, beim Öffnen der App und sobald wieder Internet da ist. Von Hand: **Menü → Koop** → das Sync-Symbol rechts neben dem Status.
+
+**Wie funktioniert das ohne Server?** Die Funde laufen über mehrere öffentliche **Nostr-Relays** (frei nutzbare Nachrichten-Server, die jeder verwenden darf). Alles ist mit eurem Gruppencode **verschlüsselt** (AES-256). Die Relays sehen nur unlesbare Pakete, keine Namen, keine Orte. Die App schreibt gleichzeitig an fünf Relays, damit nichts verloren geht, wenn eines ausfällt. Deine eigenen Funde bleiben ohnehin immer auf deinem Handy.
+
+**Was wird geteilt?** Nur aufgedeckte Flächen, Kilometerzahlen und der Anzeigename. Der GPS-Verlauf wird nie übertragen. Den Live-Standort sehen andere nur, wenn du ihn in *Menü → Koop → Live-Standort* ausdrücklich einschaltest. Er verfällt nach 10 Minuten.
+Aus den aufgedeckten Flächen ist erkennbar, wo du unterwegs warst. Gib den Gruppencode deshalb nur Leuten, die das sehen dürfen. Wer den Code kennt, kann beitreten und alles sehen.
+
+---
+
+## 4. Eigener Koop-Server (optional, nur für Technikaffine)
+
+Nicht nötig. Wer die Daten lieber auf einem eigenen Server hat statt auf öffentlichen Relays, kann einen einrichten und die Adresse unter **Menü → App → Koop-Server** im Feld *Eigene Server-Adresse* eintragen. Wer per Einladung beitritt, übernimmt die Adresse automatisch.
+
+
+Empfohlen ist **Cloudflare Workers + D1**: **kostenlos**, mit HTTPS, die Daten bleiben dauerhaft erhalten. Das Free-Kontingent (100.000 Anfragen/Tag) reicht für eine Gruppe von Kollegen um ein Vielfaches.
+
+#### Weg A: automatisch per GitHub (empfohlen)
 
 1. **Cloudflare-Konto:** auf **dash.cloudflare.com/sign-up** kostenlos registrieren und die E-Mail bestätigen.
 2. Im Cloudflare-Dashboard links (Menü ☰) **„Workers & Pages“** öffnen. Falls nach einer *workers.dev-Subdomain* gefragt wird, einen Namen wählen und bestätigen. Das musst du nur einmal machen.
@@ -56,7 +75,7 @@ Für das gemeinsame Spielen braucht ihr einen kleinen Server. Empfohlen ist **Cl
    Nach ca. 2 Minuten steht in der Zusammenfassung des Laufs **„✅ Koop-Server läuft“** mit der Adresse (`https://foggymap-sync.<name>.workers.dev`).
 7. Danach wird **automatisch eine neue FoggyMap.apk** mit eingebauter Serveradresse gebaut (Actions → „FoggyMap APK“, ca. 8 Minuten). Diese Version installierst du wie unter Punkt 1, und deine Kollegen bekommen dieselbe Datei.
 
-### Weg B: ohne GitHub-Secrets, direkt im Cloudflare-Dashboard
+#### Weg B: ohne GitHub-Secrets, direkt im Cloudflare-Dashboard
 
 1. Cloudflare-Konto wie oben.
 2. **D1-Datenbank:** Menü → *Storage & Databases* → **D1 SQL Database** → **Create** → Name `foggymap` → Create.
@@ -65,23 +84,11 @@ Für das gemeinsame Spielen braucht ihr einen kleinen Server. Empfohlen ist **Cl
    `server/cloudflare/dashboard-worker.js` aus diesem Repository einfügen. Am Handy geht das so: Datei auf GitHub öffnen → **Raw** → alles markieren → kopieren. Dann **Deploy**.
 5. **Datenbank verbinden:** Worker → **Settings** → **Bindings** → **Add** → **D1 database** → Variable name **`DB`** → Datenbank `foggymap` → **Save/Deploy**.
 6. Die Adresse `https://foggymap-sync.<name>.workers.dev` öffnen. Es muss `{"ok":true,...}` erscheinen.
-7. In der App: **Menü → Koop** → Feld **Server-Adresse** → diese Adresse eintragen (nur der Gruppenersteller; wer per Einladung beitritt, bekommt sie automatisch).
+7. In der App: **Menü → App → Koop-Server** → Feld *Eigene Server-Adresse* → diese Adresse eintragen (nur der Gruppenersteller; wer per Einladung beitritt, bekommt sie automatisch).
 
-### Weg C: eigener Server (für Technikaffine)
+#### Weg C: eigener Server (für Technikaffine)
 `server/docker-compose.yml` startet den Node.js-Server mit SQLite und automatischem HTTPS über Caddy:
 `DOMAIN=foggy.example.de docker compose up -d` (Domain muss auf den Server zeigen).
-
----
-
-## 4. Mit Kollegen spielen
-
-1. **Du:** FoggyMap → oben **Menü** → **Koop** → Anzeigename und Gruppenname eintragen → **Gruppe erstellen**.
-2. Auf das **Teilen-Symbol** neben dem Code tippen und die Einladung z. B. per WhatsApp verschicken.
-3. **Die APK an Kollegen geben:** Schicke ihnen den Link **github.com/JustFunLP/FoggyMap/releases** (sie brauchen kein GitHub-Konto) und lass sie wie in Abschnitt 1 installieren. Danach aktualisiert sich die App auch bei ihnen von selbst.
-4. **Kollege:** APK installieren → App öffnen → **Menü → Koop** → die komplette Einladungsnachricht in das Feld *„Einladung einfügen“* kopieren (oder in WhatsApp lange auf die Nachricht tippen → **Teilen → FoggyMap**) → **Beitreten**.
-5. Ab jetzt sehen alle, was jeder aufdeckt. Synchronisiert wird automatisch alle paar Minuten, nach neuen Funden und sobald wieder Internet da ist.
-
-**Was wird geteilt?** Nur aufgedeckte Flächen, Kilometerzahlen und der Anzeigename. Der GPS-Verlauf wird nie übertragen. Den Live-Standort sehen andere nur, wenn du ihn in *Menü → Koop → Live-Standort* ausdrücklich einschaltest. Er verfällt nach 10 Minuten.
 
 ---
 
@@ -92,5 +99,7 @@ Für das gemeinsame Spielen braucht ihr einen kleinen Server. Empfohlen ist **Cl
 | „Kartendaten: …“ / „Offline …“ | Kein Netz oder der Kartenserver ist kurz nicht erreichbar. Die App versucht es nach wenigen Sekunden erneut, deine Wege gehen nicht verloren. |
 | Nichts wird aufgedeckt | GPS-Genauigkeit oben in der Statuszeile prüfen. Über ±35 m (z. B. drinnen) wird absichtlich nichts aufgedeckt. |
 | Aufzeichnung stoppt im Hintergrund | Menü → App → Akku-Optimierung → „Nicht eingeschränkt“. Bei Xiaomi zusätzlich „Autostart“ erlauben. |
-| Koop: „Server nicht erreichbar“ | Server-Adresse prüfen (muss mit `https://` beginnen). Beim Cloudflare-Weg B die D1-Bindung `DB` prüfen. |
-| Workflow „Koop-Server“ schlägt fehl | In der Zusammenfassung steht der Grund. Meist fehlen Secrets oder die workers.dev-Subdomain (Schritt 2). |
+| Koop: „Keine Verbindung zu den Koop-Relays“ | Kein Internet, oder ein Firmen-/Hotel-WLAN blockiert WebSockets. Mobile Daten versuchen. Deine Funde bleiben gespeichert und werden später geteilt. |
+| Koop: „Keine Gruppe mit diesem Code gefunden“ | Code prüfen. Der Gruppenersteller muss die App nach dem Erstellen einmal mit Internet geöffnet haben. |
+| Eigener Server: „Server nicht erreichbar“ | Server-Adresse prüfen (muss mit `https://` beginnen). Beim Cloudflare-Weg B die D1-Bindung `DB` prüfen. |
+| Workflow „Koop-Server“ schlägt fehl (nur eigener Server) | In der Zusammenfassung steht der Grund. Meist fehlen Secrets oder die workers.dev-Subdomain (Schritt 2). |

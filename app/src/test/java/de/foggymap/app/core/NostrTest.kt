@@ -33,6 +33,10 @@ class NostrTest {
         assertEquals(g.tag, GroupKey("ABCDEFGHJKMN").tag)
         assertTrue(g.tag != GroupKey("ABCDEFGHJKMP").tag)
         assertFalse(sealed.contains("geheim"))
+        // Tampered data is rejected (AES-GCM authentication), not decoded into garbage.
+        val raw = java.util.Base64.getDecoder().decode(sealed)
+        raw[raw.size - 5] = (raw[raw.size - 5].toInt() xor 1).toByte()
+        assertNull(g.open(java.util.Base64.getEncoder().encodeToString(raw)))
     }
 
     @Test fun realRevealsFitIntoRelaySizedEvents() {

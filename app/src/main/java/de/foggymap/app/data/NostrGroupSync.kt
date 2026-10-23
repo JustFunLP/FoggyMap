@@ -37,7 +37,9 @@ class NostrGroupSync(private val relays: NostrRelays, private val secret: ByteAr
     data class Member(val pubkey: String, val name: String, val groupName: String, val roads: Int, val km: Double,
                       val lastSeen: Long, val live: LatLon?)
 
-    data class Result(val published: Int, val received: List<RevealItem>, val members: List<Member>, val relaysOk: Int, val newest: Long)
+    data class Result(val published: Int, val received: List<RevealItem>, val members: List<Member>, val relaysOk: Int, val newest: Long,
+                      /** The member card was accepted by at least one relay. */
+                      val metaOk: Boolean = false)
 
     /**
      * One round: publish what changed, then fetch what is new since [since] (seconds).
@@ -57,6 +59,7 @@ class NostrGroupSync(private val relays: NostrRelays, private val secret: ByteAr
         if (meta != null) outgoing += -1 to event(now, "m", "m", key.seal(JSONObject().put("n", meta.name).put("g", meta.groupName)
             .put("r", meta.roads).put("k", meta.km).toString()))
         var publishedCount = 0
+        var metaOk = false
         if (outgoing.isNotEmpty()) {
             val acks = relays.publish(outgoing.map { it.second })
             val okIds = acks.filter { it.ok }.map { it.eventId }.toSet()
@@ -65,6 +68,7 @@ class NostrGroupSync(private val relays: NostrRelays, private val secret: ByteAr
                 store.markSynced(chunks[i].map { it.id })
                 publishedCount++
             }
+            metaOk = outgoing.any { (i, e) -> i == -1 && e.id in okIds }
             if (okIds.isEmpty() && acks.isNotEmpty()) throw java.io.IOException(acks.first().message.ifEmpty { "Relays nehmen nichts an" })
         } else {
             // Nothing new to send: everything already published counts as synced.
@@ -99,7 +103,7 @@ class NostrGroupSync(private val relays: NostrRelays, private val secret: ByteAr
             }
         }
         val list = members.values.map { it.copy(live = lives[it.pubkey]) }
-        return Result(publishedCount, received, list, relays.reachable, newest)
+        return Result(publishedCount, received, list, relays.reachable, newest, metaOk)
     }
 
     /** Does a group with this code exist (anyone published a member card)? Null = relays not reachable. */

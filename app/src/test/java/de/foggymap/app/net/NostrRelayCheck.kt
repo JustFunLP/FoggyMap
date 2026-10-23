@@ -79,6 +79,7 @@ class NostrRelayCheck {
             "${rb1.received.size}, A erhielt ${ra2.received.size} von B, Mitglieder ${ra3.members.map { it.name }}, Live ${ra3.members.count { it.live != null }}, " +
             "Relays erreichbar ${ra3.relaysOk}/${NostrRelays.DEFAULT.size}, ${System.currentTimeMillis() - t0} ms")
         assertEquals("CI-Gruppe", found?.groupName)
+        assertTrue("member cards accepted", ra1.metaOk && rb1.metaOk)
         assertEquals(aItems.map { it.id }.toSet(), rb1.received.map { it.id }.toSet())
         assertEquals(bItems.map { it.id }.toSet(), ra2.received.map { it.id }.toSet())
         assertTrue(ra3.members.map { it.name }.containsAll(listOf("Anna", "Ben")))

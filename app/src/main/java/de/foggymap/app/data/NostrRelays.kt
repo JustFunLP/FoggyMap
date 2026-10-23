@@ -71,8 +71,9 @@ class NostrRelays(val urls: List<String>, private val userAgent: String,
         newest.values.toList()
     }
 
-    /** Which relays answered the last query (for the status line). */
-    @Volatile var reachable: Int = 0; private set
+    private val answered = Collections.synchronizedSet(HashSet<String>())
+    /** How many relays answered since [resetReachable] (for the status line). */
+    val reachable: Int get() = answered.size
 
     private suspend fun queryFrom(url: String, filter: JSONObject, timeoutMs: Long): List<NostrEvent> {
         val sub = "fm" + (100000..999999).random()
@@ -96,11 +97,11 @@ class NostrRelays(val urls: List<String>, private val userAgent: String,
         val ok = withTimeoutOrNull(timeoutMs) { done.await() } ?: false
         try { ws.send(JSONArray().put("CLOSE").put(sub).toString()) } catch (_: Exception) { }
         ws.close(1000, null)
-        if (ok) synchronized(this) { reachable++ }
+        if (ok) answered += url
         return ArrayList(out)
     }
 
-    fun resetReachable() { reachable = 0 }
+    fun resetReachable() { answered.clear() }
 
     companion object {
         /** Public relays that accept app data (NIP-78) – checked by the CI relay test. */
@@ -109,7 +110,7 @@ class NostrRelays(val urls: List<String>, private val userAgent: String,
             "wss://relay.primal.net",
             "wss://nostr.mom",
             "wss://relay.snort.social",
-            "wss://relay.damus.io",
+            "wss://nostr-pub.wellorder.net",
         )
     }
 }

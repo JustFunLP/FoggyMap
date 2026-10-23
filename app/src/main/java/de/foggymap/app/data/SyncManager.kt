@@ -290,7 +290,7 @@ class SyncManager(private val context: Context, private val db: RevealDatabase, 
             val published = prefs.nostrPublished
             val r = g.sync(store, published, prefs.nostrSince, if (sendMeta) meta else null)
             prefs.nostrPublished = published
-            if (sendMeta) { prefs.nostrMetaHash = metaHash; prefs.nostrMetaAt = now }
+            if (r.metaOk) { prefs.nostrMetaHash = metaHash; prefs.nostrMetaAt = now }
             prefs.nostrSince = r.newest
             if (r.relaysOk == 0) throw IOException("Keine Verbindung zu den Koop-Relays")
             if (r.received.isNotEmpty()) App.notifyDbChanged(remoteRoads = r.received.filter { it.id.startsWith("r:") }.map { it.id })
