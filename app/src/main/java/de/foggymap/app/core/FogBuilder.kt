@@ -92,10 +92,35 @@ class FogBuilder(anchorLat: Double, private val levels: DoubleArray = doubleArra
         feature(lineJson(l), "\"id\":\"${r.id}\"")
     })
 
-    fun buildingsGeoJson(only: Collection<RevealItem>? = null): String =
-        featureCollection((only ?: buildings.values).filter { it.kind == RevealKind.BUILDING }.map { b ->
-            feature(multiPolygonJson(b.polygons), "\"h\":${b.height},\"mh\":${b.minHeight}")
-        })
+    /**
+     * 3D buildings for the map. Stored footprints are slightly enlarged (so the fog never shows a seam
+     * around them), which makes neighbouring houses overlap: two walls in the same place flicker on a
+     * phone GPU when the map turns ("z-fighting"). So for drawing, every footprint is shrunk back
+     * (0.9 m, sharp corners) and a building already covered by another one is drawn only once.
+     */
+    fun buildingsGeoJson(only: Collection<RevealItem>? = null): String {
+        for (b in buildings.values) if (b.id !in shown3d) shown3d[b.id] = drawable(b)
+        val ids = only?.filter { it.kind == RevealKind.BUILDING }?.map { it.id } ?: buildings.keys
+        return featureCollection(ids.mapNotNull { id -> shown3d[id]?.takeIf { it.isNotEmpty() } })
+    }
+
+    private val shown3d = HashMap<String, String>()
+    private val shownIndex = org.locationtech.jts.index.quadtree.Quadtree()
+
+    private fun drawable(b: RevealItem): String {
+        val g = toGeometry(b) ?: return ""
+        val params = org.locationtech.jts.operation.buffer.BufferParameters(1,
+            org.locationtech.jts.operation.buffer.BufferParameters.CAP_FLAT,
+            org.locationtech.jts.operation.buffer.BufferParameters.JOIN_MITRE, 4.0)
+        val shrunk = try { org.locationtech.jts.operation.buffer.BufferOp.bufferOp(g, -SHRINK_3D, params) } catch (_: Exception) { g }
+        val shape = if (shrunk.isEmpty || shrunk.area < 4.0) g else shrunk
+        val centre = try { shape.interiorPoint } catch (_: Exception) { return "" }
+        @Suppress("UNCHECKED_CAST")
+        val covered = (shownIndex.query(centre.envelopeInternal) as List<Geometry>).any { o -> try { o.contains(centre) } catch (_: Exception) { false } }
+        if (covered) return ""
+        shownIndex.insert(shape.envelopeInternal, shape)
+        return feature(geometryJson(shape), "\"h\":${b.height},\"mh\":${b.minHeight}")
+    }
 
     fun itemsGeoJson(items: Collection<RevealItem>): String =
         featureCollection(items.filter { it.kind != RevealKind.BUILDING }.map { feature(multiPolygonJson(it.polygons)) })
@@ -161,6 +186,8 @@ class FogBuilder(anchorLat: Double, private val levels: DoubleArray = doubleArra
 
     companion object {
         const val EMPTY = "{\"type\":\"FeatureCollection\",\"features\":[]}"
+        /** How far 3D footprints are shrunk for drawing (stored footprints are 0.8 m larger). */
+        const val SHRINK_3D = 0.9
 
         fun featureCollection(features: List<String>) =
             "{\"type\":\"FeatureCollection\",\"features\":[" + features.joinToString(",") + "]}"
