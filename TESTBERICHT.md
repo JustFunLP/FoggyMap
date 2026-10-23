@@ -14,7 +14,7 @@ Stand: 23.10.2026. Alle Ergebnisse stammen aus echten Läufen, die du jederzeit 
 
 ## ✅ Automatisch getestet
 
-**1. Kernlogik (78 Unit-Tests, laufen bei jedem Build)**
+**1. Kernlogik (79 Unit-Tests, laufen bei jedem Build)**
 - Straßenaufteilung: Teilung an Kreuzungen, Fußwege teilen keine Straßen, Brücken bilden keine Kreuzung, Gehwege und Zufahrten werden ignoriert, lange Landstraßen werden gestückelt, die IDs sind kachelübergreifend stabil.
 - **Straßennetz aus Vektorkacheln (neu, ersetzt Overpass):** Mit künstlich erzeugten Kacheln (Schnitt an Kachelrändern, weggekürzte Kreuzungspunkte) und mit **echten OpenFreeMap-Kacheln** aus Odenthal (Dorf) und Berlin-Prenzlauer Berg, verglichen mit den Overpass-Daten derselben Gegend vom selben Tag:
   - 62 von 62 bzw. 65 von 65 echten Kreuzungen gefunden, keine Straße fehlt.
@@ -58,7 +58,11 @@ Der Build-Test spricht mit den echten Relays im Internet, nicht mit einer Attrap
 - **Live alle 2–3 Sekunden (neu):** Jedes der 5 Relays leitet die flüchtigen Live-Nachrichten weiter (3 von 3 angekommen), die erste nach 70–560 ms. Über alle Relays zusammen kamen 4 von 4 an, Funde reisen mit.
 
 **7. Fenster und Figuren**
-- Fensterflackern beim Drehen: im Browser mit echten Berliner Kacheln gemessen (Bild-zu-Bild-Unterschied beim Drehen in 0,35°-Schritten, Pixeldichte wie ein Handy). Altes Muster 9,0, neues Muster 6,7, also etwa ein Viertel weniger Flackern. Dazu überlappen Dach und Fassade nicht mehr (dort konnte es flimmern). Auf einem echten Handy nicht geprüft.
+- Fensterflackern beim Drehen, zwei Ursachen behoben:
+  1. **Überlappende Häuser:** Die gespeicherten Grundrisse sind 0,8 m größer, deshalb überlappten Nachbarhäuser. Allein im Berliner Testausschnitt waren es 290 Paare. Zwei Wände an derselben Stelle flimmern auf Handy-Grafikchips beim Drehen. Zum Zeichnen werden die Grundrisse jetzt 0,9 m verkleinert, und doppelte Häuser (alte Daten, Kopien von Freunden) werden nur einmal gezeichnet. Danach überlappt nichts mehr, das ist mit einem Unit-Test belegt.
+  2. **Zu feines Fenstermuster:** Gemessen im Browser mit echten Berliner Kacheln, beim Drehen in 0,05°-Schritten bei Handy-Pixeldichte. Der Anteil flackernder Pixel lag bei 1,85 % (Build 38) bzw. 0,85 % (Build 40), mit dem neuen Muster (2 breite, weiche Fenster je Kachel) sind es 0,29 %.
+
+  Das Überlappungs-Flimmern zeigt sich im Browser-Renderer nicht. Ob es auf deinem Handy ganz weg ist, kann ich nur über deinen Test erfahren.
 - Mini-Figuren und Abzeichen-Einblendung werden bei jedem Build gerendert (alle 72 Figurenbilder als Bogen, Abzeichen-Moment als Bild). Die Animation selbst (Drehen, Konfetti, Vibrieren) läuft nur auf dem Gerät und ist dort nicht geprüft.
 
 **8. Aussehen der 3D-Karte (Vorschau)**
