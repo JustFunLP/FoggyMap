@@ -83,7 +83,20 @@ jobs:
       - name: Unit tests
         run: |
           set -o pipefail
-          gradle --no-daemon :app:testDebugUnitTest 2>&1 | tee -a build.log
+          gradle --no-daemon :app:testDebugUnitTest --tests 'de.foggymap.app.core.*' 2>&1 | tee -a build.log
+
+      - name: UI screenshots (Robolectric, never blocks the build)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -o pipefail
+          gradle --no-daemon :app:testDebugUnitTest --tests 'de.foggymap.app.ui.*' 2>&1 | tail -40
+          ls app/build/screenshots || true
+          if ls app/build/screenshots/*.png >/dev/null 2>&1; then
+            gh release view ui-shots >/dev/null 2>&1 || gh release create ui-shots --draft --title "UI-Screenshots (intern)" --notes "Robolectric-Screenshots der Oberfläche"
+            gh release upload ui-shots app/build/screenshots/*.png --clobber
+          fi
 
       - name: Build APKs
         run: |

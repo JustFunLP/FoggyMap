@@ -17,6 +17,11 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
 
+enum class RevealMode { BLOCKS, STREET, RADIUS }
+
+/** How much a walked street uncovers. [depth]: strip width per side (STREET) or radius (RADIUS) in metres. */
+data class RevealSettings(val mode: RevealMode = RevealMode.BLOCKS, val depth: Double = 40.0)
+
 /** A city block: a face of the planar street graph (streets, railways and rivers as boundaries). */
 class Face(val id: String, val polygon: Polygon, val reliable: Boolean) {
     val area: Double = polygon.area
@@ -85,21 +90,36 @@ class WorldModel(val data: OsmData) {
     // ---------------------------------------------------------------- reveal
 
     /**
-     * What becomes visible when [segment] is driven/walked:
-     *  1. the street corridor between its two junctions,
-     *  2. the city blocks whose boundary runs along this segment (not blocks that merely touch the
-     *     junction, so cross streets and parallel streets stay hidden),
-     *  3. for huge/open blocks only a 40 m deep strip; in open settlements without closed blocks a
-     *     30 m strip on both sides that stops at the next street (never reaches across it).
-     * Buildings are not part of the street data: [BuildingRevealer] adds every building inside these
-     * areas once the (lazily loaded) building tile is available.
+     * What becomes visible when [segment] is driven/walked, depending on the chosen [RevealMode]:
+     *
+     * BLOCKS (default): the street corridor between its two junctions, plus
+     *  - every city block whose boundary runs along this segment (not blocks that merely touch the
+     *    junction, so cross streets and parallel streets stay hidden) – up to [MAX_BLOCK_AREA];
+     *    bigger blocks (industrial estates, parks, fields) only as a [STRIP_DEPTH] strip,
+     *  - on a side without any block (lake shore, fields, edge of town) a [OPEN_DISTANCE] strip.
+     * STREET: corridor plus a strip of [RevealSettings.depth] on both sides.
+     * RADIUS: only the corridor here; the circle around your path comes from [RadiusRevealer].
+     * Strips never reach across another street. Buildings are not part of the street data:
+     * [BuildingRevealer] adds every building inside these areas.
      */
-    fun reveal(segment: Segment): List<RevealItem> {
+    fun reveal(segment: Segment, settings: RevealSettings = RevealSettings()): List<RevealItem> {
         val items = ArrayList<RevealItem>()
         val corridor = buffer(segment.line, segment.roadClass.corridorHalfWidth, BufferParameters.CAP_FLAT)
         items += RevealItem("r:${segment.id}", RevealKind.ROAD, RevealItem.polygonsOf(corridor, proj),
             line = segment.points, length = segment.length, name = segment.name)
+        when (settings.mode) {
+            RevealMode.RADIUS -> {}
+            RevealMode.STREET -> {
+                val d = settings.depth.coerceIn(10.0, 150.0)
+                for (left in listOf(true, false)) sideStrip(segment, left, d, "w${d.toInt()}")?.let { items += it }
+            }
+            RevealMode.BLOCKS -> revealBlocks(segment, items)
+        }
+        // Tiny slivers can vanish completely when simplified – never emit an item without geometry.
+        return items.filter { it.polygons.isNotEmpty() }
+    }
 
+    private fun revealBlocks(segment: Segment, items: MutableList<RevealItem>) {
         val adjacent = adjacentFaces(segment)
         for (f in adjacent) {
             if (f.reliable && f.area in MIN_BLOCK_AREA..MAX_BLOCK_AREA) {
@@ -110,17 +130,25 @@ class WorldModel(val data: OsmData) {
                 strip(segment, f, STRIP_DEPTH)?.let { (_, item) -> items += item }
             }
         }
-        if (adjacent.isEmpty() && segment.blockForming.not()) {
-            // Footpath inside a park or courtyard: reveal a strip of the surrounding face.
-            val mid = segment.line.interiorPoint
-            @Suppress("UNCHECKED_CAST")
-            (faceIndex.query(mid.envelopeInternal) as List<Face>).filter { it.polygon.contains(mid) }.forEach { f ->
-                strip(segment, f, PATH_STRIP_DEPTH)?.let { (_, item) -> items += item }
+        if (!segment.blockForming) {
+            if (adjacent.isEmpty()) {
+                // Footpath inside a park or courtyard: reveal a strip of the surrounding face.
+                val mid = segment.line.interiorPoint
+                @Suppress("UNCHECKED_CAST")
+                (faceIndex.query(mid.envelopeInternal) as List<Face>).filter { it.polygon.contains(mid) }.forEach { f ->
+                    strip(segment, f, PATH_STRIP_DEPTH)?.let { (_, item) -> items += item }
+                }
             }
+            return
         }
-        if (adjacent.isEmpty() && segment.blockForming) openStrip(segment)?.let { items += it }
-        // Tiny slivers can vanish completely when simplified – never emit an item without geometry.
-        return items.filter { it.polygons.isNotEmpty() }
+        if (adjacent.isEmpty()) { openStrip(segment)?.let { items += it }; return }
+        // A side of the street without any block (lake shore, fields, edge of town) still shows what lies next to it.
+        for (left in listOf(true, false)) {
+            val probe = singleSided(segment.line, if (left) SIDE_PROBE else -SIDE_PROBE)
+            if (probe.isEmpty) continue
+            val covered = adjacent.sumOf { f -> safeArea { f.polygon.intersection(probe).area } }
+            if (covered < 0.3 * probe.area) sideStrip(segment, left, OPEN_DISTANCE, "o")?.let { items += it }
+        }
     }
 
     /**
@@ -129,17 +157,34 @@ class WorldModel(val data: OsmData) {
      */
     private fun openStrip(segment: Segment): RevealItem? {
         val strip = buffer(segment.line, OPEN_DISTANCE, BufferParameters.CAP_FLAT)
+        val g = cutAtOtherStreets(segment, strip) ?: return null
+        return RevealItem("s:${segment.id}~open", RevealKind.AREA, RevealItem.polygonsOf(g, proj))
+    }
+
+    /** Strip of [depth] on one side of the segment (left = left of its drawing direction), cut at other streets. */
+    private fun sideStrip(segment: Segment, left: Boolean, depth: Double, tag: String): RevealItem? {
+        val strip = singleSided(segment.line, if (left) depth else -depth)
+        if (strip.isEmpty) return null
+        val g = cutAtOtherStreets(segment, strip) ?: return null
+        return RevealItem("s:${segment.id}~${if (left) "l" else "r"}$tag", RevealKind.AREA, RevealItem.polygonsOf(g, proj))
+    }
+
+    private fun cutAtOtherStreets(segment: Segment, strip: Geometry): Geometry? {
         @Suppress("UNCHECKED_CAST")
         val others = (segIndex.query(strip.envelopeInternal) as List<Segment>)
-            .filter { it !== segment && it.blockForming && it.line.intersects(strip) }
+            .filter { it !== segment && it.id != segment.id && it.blockForming && it.line.intersects(strip) }
             .map { buffer(it.line, 2.5, BufferParameters.CAP_ROUND) }
         val cut = if (others.isEmpty()) strip else safe { strip.difference(UnaryUnionOp.union(others)) } ?: return null
         val core = buffer(segment.line, segment.roadClass.corridorHalfWidth + 1.0, BufferParameters.CAP_FLAT)
         val parts = (0 until cut.numGeometries).map { cut.getGeometryN(it) }.filter { it.intersects(core) && it.area > MIN_BLOCK_AREA }
         if (parts.isEmpty()) return null
-        val g = UnaryUnionOp.union(parts)
-        return RevealItem("s:${segment.id}~open", RevealKind.AREA, RevealItem.polygonsOf(g, proj))
+        return UnaryUnionOp.union(parts)
     }
+
+    private fun singleSided(line: LineString, distance: Double): Geometry = try {
+        val params = BufferParameters(6, BufferParameters.CAP_FLAT, BufferParameters.JOIN_ROUND, 5.0).apply { isSingleSided = true }
+        BufferOp.bufferOp(line, distance, params)
+    } catch (_: Exception) { gf.createPolygon() }
 
     private fun strip(segment: Segment, f: Face, depth: Double): Pair<Geometry, RevealItem>? {
         val g = safe { f.polygon.intersection(buffer(segment.line, depth, BufferParameters.CAP_FLAT)).buffer(-BLOCK_INSET / 2) } ?: return null
@@ -207,10 +252,11 @@ class WorldModel(val data: OsmData) {
     companion object {
         const val EDGE_MARGIN = 60.0
         const val MIN_BLOCK_AREA = 40.0
-        /** 5 ha. Bigger faces (industrial estates, parks, fields) only get a strip revealed. */
+        /** 5 ha (Berlin perimeter blocks are 2–5 ha). Bigger faces (industrial estates, parks, fields) only get a strip. */
         const val MAX_BLOCK_AREA = 50_000.0
         const val BLOCK_INSET = 3.0
-        const val STRIP_DEPTH = 40.0
+        const val STRIP_DEPTH = 50.0
+        const val SIDE_PROBE = 4.0
         const val PATH_STRIP_DEPTH = 25.0
         const val ADJ_TOLERANCE = 2.0
         const val OPEN_DISTANCE = 30.0

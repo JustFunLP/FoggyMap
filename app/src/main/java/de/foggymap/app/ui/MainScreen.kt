@@ -40,6 +40,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -81,7 +82,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class Sheet { NONE, STATS, GROUP, SETTINGS }
+enum class Sheet { NONE, STATS, MENU }
 
 @Composable
 fun FoggyRoot(activity: MainActivity) {
@@ -107,7 +108,10 @@ fun MainScreen(activity: MainActivity) {
     /** The user moved the map away by hand – do not grab it back automatically. */
     var releasedByUser by remember { mutableStateOf(false) }
     val perspective = App.prefs.perspective
-    var sheet by remember { mutableStateOf(if (activity.pendingInvite != null) Sheet.GROUP else Sheet.NONE) }
+    var sheet by remember { mutableStateOf(if (activity.pendingInvite != null) Sheet.MENU else Sheet.NONE) }
+    var menuTab by remember { mutableStateOf(if (activity.pendingInvite != null) MenuTab.COOP else MenuTab.EXPLORE) }
+    // An invitation shared into the app opens the Koop tab.
+    LaunchedEffect(activity.pendingInvite) { if (activity.pendingInvite != null) { menuTab = MenuTab.COOP; sheet = Sheet.MENU } }
     var permissionProblem by remember { mutableStateOf<String?>(null) }
     var locationEnabled by remember { mutableStateOf(false) }
 
@@ -232,13 +236,7 @@ fun MainScreen(activity: MainActivity) {
                 Spacer(Modifier.width(8.dp))
                 LogoTitle(22)
                 Spacer(Modifier.weight(1f))
-                TopChip(painterResource(R.drawable.ic_group), if (syncUi.inGroup) "${maxOf(syncUi.members.size, 1)}" else "Koop",
-                    active = syncUi.inGroup) { sheet = Sheet.GROUP }
-                Spacer(Modifier.width(8.dp))
-                Box(Modifier.size(42.dp).clip(CircleShape).background(Fog.Surface.copy(alpha = 0.85f)).clickable { sheet = Sheet.SETTINGS },
-                    contentAlignment = Alignment.Center) {
-                    Icon(rememberVectorPainter(Icons.Filled.Settings), "Einstellungen", tint = Fog.Lavender, modifier = Modifier.size(22.dp))
-                }
+                MenuButton(if (syncUi.inGroup) maxOf(syncUi.members.size, 1) else 0) { menuTab = MenuTab.EXPLORE; sheet = Sheet.MENU }
             }
             AnimatedVisibility(tracking.active || tracking.message != null, enter = fadeIn() + slideInVertically(), exit = fadeOut() + slideOutVertically()) {
                 StatusChips(tracking)
@@ -265,8 +263,7 @@ fun MainScreen(activity: MainActivity) {
 
     when (sheet) {
         Sheet.STATS -> StatsSheet(counts, coverage, syncUi) { sheet = Sheet.NONE }
-        Sheet.GROUP -> GroupSheet(syncUi, activity.pendingInvite, onInviteUsed = { activity.pendingInvite = null }) { sheet = Sheet.NONE }
-        Sheet.SETTINGS -> SettingsSheet(
+        Sheet.MENU -> MenuSheet(syncUi, activity.pendingInvite, onInviteUsed = { activity.pendingInvite = null }, initialTab = menuTab,
             onChanged = {
                 controller?.setBuildingsVisible(App.prefs.buildings3d)
                 controller?.setPerspective(App.prefs.perspective)
@@ -298,9 +295,30 @@ fun MainScreen(activity: MainActivity) {
     }
 }
 
+/** Opens the one menu (Erkunden · Koop · App). Shows the group size when you are in a group. */
+@Composable
+internal fun MenuButton(groupSize: Int, onClick: () -> Unit) {
+    Row(Modifier.height(44.dp).clip(RoundedCornerShape(22.dp)).background(Fog.Surface.copy(alpha = 0.9f))
+        .border(1.dp, Fog.Line, RoundedCornerShape(22.dp)).clickable(onClick = onClick).padding(start = 14.dp, end = if (groupSize > 0) 6.dp else 14.dp),
+        verticalAlignment = Alignment.CenterVertically) {
+        Icon(rememberVectorPainter(Icons.Filled.Menu), "Menü", tint = Fog.Lavender, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(8.dp))
+        Text("Menü", color = Fog.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        if (groupSize > 0) {
+            Spacer(Modifier.width(8.dp))
+            Row(Modifier.height(32.dp).clip(RoundedCornerShape(16.dp)).background(Fog.button).padding(horizontal = 10.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Icon(painterResource(R.drawable.ic_group), null, tint = Color.White, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(5.dp))
+                Text("$groupSize", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+    }
+}
+
 /** One button: fix the map on your position, viewing direction up. Filled while it is active. */
 @Composable
-private fun LocateButton(active: Boolean, onClick: () -> Unit) {
+internal fun LocateButton(active: Boolean, onClick: () -> Unit) {
     Box(Modifier.size(54.dp).clip(CircleShape)
         .background(if (active) Fog.button else Brush.linearGradient(listOf(Fog.Surface.copy(alpha = 0.92f), Fog.Surface.copy(alpha = 0.92f))))
         .border(1.dp, if (active) Color.White.copy(alpha = 0.25f) else Fog.Line, CircleShape)
@@ -330,7 +348,7 @@ private fun Chip(content: @Composable androidx.compose.foundation.layout.RowScop
 
 /** Compact status line: GPS quality · travel mode · GPS pause · loading. */
 @Composable
-private fun StatusChips(t: de.foggymap.app.TrackingUi) {
+internal fun StatusChips(t: de.foggymap.app.TrackingUi) {
     val acc = t.accuracy
     val dot = when {
         !t.active -> Fog.Muted
@@ -372,7 +390,7 @@ private fun StatusChips(t: de.foggymap.app.TrackingUi) {
 
 /** Short banner whenever a new street section is uncovered. */
 @Composable
-private fun RevealBanner(t: de.foggymap.app.TrackingUi) {
+internal fun RevealBanner(t: de.foggymap.app.TrackingUi) {
     var shown by remember { mutableStateOf<String?>(null) }
     var lastCount by remember { mutableStateOf(t.sessionSegments) }
     LaunchedEffect(t.sessionSegments) {
@@ -426,7 +444,7 @@ private fun ProgressRing(percent: Float, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun BottomCard(percent: Double?, counts: RevealDatabase.Counts?, t: de.foggymap.app.TrackingUi, onExpand: () -> Unit, onStart: () -> Unit) {
+internal fun BottomCard(percent: Double?, counts: RevealDatabase.Counts?, t: de.foggymap.app.TrackingUi, onExpand: () -> Unit, onStart: () -> Unit) {
     val animated by animateFloatAsState((percent ?: 0.0).toFloat(), tween(900), label = "pct")
     GlassCard(Modifier.fillMaxWidth(), padding = 14.dp) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable(onClick = onExpand)) {

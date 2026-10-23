@@ -67,6 +67,9 @@ class Explorer(knownRoadIds: Collection<String>) {
 
     private var lastPos: LatLon? = null
 
+    /** What a walked street uncovers (blocks / street strip / radius), from the settings. */
+    var settings = RevealSettings()
+
     private val gapFill = GapFill()
     /** Tests can switch the gap filling off to look at the matcher alone. */
     var gapFillEnabled = true
@@ -120,7 +123,7 @@ class Explorer(knownRoadIds: Collection<String>) {
             val model = bestModelFor(s) ?: continue
             val local = model.segmentById[s.id] ?: continue
             segs += local
-            model.reveal(local).forEach { items.putIfAbsent(it.id, it) }
+            model.reveal(local, settings).forEach { items.putIfAbsent(it.id, it) }
         }
         return Step(result, items.values.toList(), segs)
     }

@@ -86,7 +86,7 @@ import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun FogSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+internal fun FogSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
@@ -190,7 +190,7 @@ private fun formatDuration(seconds: Long): String {
 // =================================================================== group / coop
 
 @Composable
-fun GroupSheet(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> Unit, onDismiss: () -> Unit) {
+internal fun CoopTab(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
@@ -205,9 +205,8 @@ fun GroupSheet(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> Unit, o
     var shareLive by remember { mutableStateOf(App.prefs.shareLiveLocation) }
     LaunchedEffect(pendingInvite) { if (pendingInvite != null) { joinText = pendingInvite; onInviteUsed() } }
 
-    FogSheet(onDismiss) {
-        Text("Koop-Modus", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Text("Gemeinsam mit Freunden dieselbe Karte aufdecken.", color = Fog.Muted, fontSize = 13.sp)
+    Column {
+        Text("Gemeinsam mit Freunden dieselbe Karte aufdecken. Jeder sieht, was die anderen entdeckt haben.", color = Fog.Muted, fontSize = 13.sp, lineHeight = 18.sp)
         Spacer(Modifier.height(14.dp))
 
         if (!sync.inGroup) {
@@ -361,141 +360,8 @@ private fun SyncStatusRow(sync: SyncUi, onSync: () -> Unit) {
     }
 }
 
-// =================================================================== settings
-
 @Composable
-fun SettingsSheet(onChanged: () -> Unit, onDataCleared: () -> Unit, onDismiss: () -> Unit) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val prefs = App.prefs
-    var battery by remember { mutableIntStateOf(prefs.batteryMode.ordinal) }
-    var b3d by remember { mutableStateOf(prefs.buildings3d) }
-    var anim by remember { mutableStateOf(prefs.fogAnimation) }
-    var tilt by remember { mutableStateOf(prefs.perspective) }
-    val area by App.tiles.prefetch.collectAsState()
-    var server by remember { mutableStateOf(prefs.server) }
-    var confirmReset by remember { mutableStateOf(false) }
-    var cacheMb by remember { mutableStateOf(0.0) }
-    var refreshKey by remember { mutableIntStateOf(0) }
-    LaunchedEffect(refreshKey, area.running, area.done) { cacheMb = withContext(Dispatchers.IO) { App.tiles.cacheSizeBytes() / 1_048_576.0 } }
-
-    FogSheet(onDismiss) {
-        Text("Einstellungen", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-
-        SectionTitle("Akku & GPS")
-        Segmented(BatteryMode.entries.map { it.label }, battery) {
-            battery = it; prefs.batteryMode = BatteryMode.entries[it]; onChanged()
-        }
-        Spacer(Modifier.height(8.dp))
-        Text(BatteryMode.entries[battery].description, color = Fog.Muted, fontSize = 12.sp)
-        Spacer(Modifier.height(10.dp))
-        InfoBox("So spart FoggyMap Akku: Nach 2–3 Minuten Stillstand schaltet sich das GPS ab. Der Bewegungssensor und kurze GPS-Stichproben wecken es wieder. " +
-            "Bei ausgeschaltetem Bildschirm sammelt der GPS-Chip die Positionen und liefert sie gebündelt. Ohne GPS-Empfang (drinnen) " +
-            "wird nach 3 Minuten pausiert. Kartendaten werden nur einmal pro Gebiet geladen und offline gespeichert.",
-            painterResource(R.drawable.ic_battery), Fog.Success)
-
-        SectionTitle("Darstellung")
-        SwitchRow("3D-Perspektive", "Karte geneigt, du siehst nach vorn (sonst Draufsicht)", tilt) { tilt = it; prefs.perspective = it; onChanged() }
-        SwitchRow("3D-Gebäude", "Aufgedeckte Gebäude plastisch darstellen", b3d) { b3d = it; prefs.buildings3d = it; onChanged() }
-        SwitchRow("Animationen", "Nebel-Auflösung, wachsende Gebäude, leuchtender Rand", anim) { anim = it; prefs.fogAnimation = it; onChanged() }
-
-        SectionTitle("Berechtigungen")
-        val fine = hasPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
-        val notif = Build.VERSION.SDK_INT < 33 || hasPermission(context, Manifest.permission.POST_NOTIFICATIONS)
-        val pm = context.getSystemService(PowerManager::class.java)
-        val unrestricted = pm?.isIgnoringBatteryOptimizations(context.packageName) == true
-        PermissionRow(rememberVectorPainter(Icons.Filled.LocationOn), "Genauer Standort", if (fine) "erteilt" else "fehlt", fine) {
-            context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")))
-        }
-        PermissionRow(rememberVectorPainter(Icons.Filled.Notifications), "Benachrichtigung", if (notif) "erteilt" else "fehlt (Aufzeichnung läuft trotzdem)", notif) {
-            context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")))
-        }
-        PermissionRow(painterResource(R.drawable.ic_battery), "Akku-Optimierung",
-            if (unrestricted) "nicht eingeschränkt" else "aktiv – manche Hersteller stoppen die Aufzeichnung", unrestricted) {
-            runCatching { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
-        }
-        Spacer(Modifier.height(6.dp))
-        InfoBox("Die Berechtigung „Immer erlauben“ ist nicht nötig: Die Erkundung läuft als sichtbarer Vordergrunddienst mit Benachrichtigung " +
-            "und funktioniert so auch bei ausgeschaltetem Bildschirm. Bei Samsung/Xiaomi/Huawei ggf. FoggyMap von der Akku-Optimierung ausnehmen.",
-            rememberVectorPainter(Icons.Filled.Info))
-
-        SectionTitle("Koop-Server")
-        OutlinedTextField(server, { server = it.trim() }, label = { Text("Eigene Server-Adresse (optional)") }, singleLine = true,
-            colors = fogTextFieldColors(), modifier = Modifier.fillMaxWidth(),
-            supportingText = { Text(if (BuildConfig.DEFAULT_SERVER.isNotEmpty()) "Eingebaut: ${BuildConfig.DEFAULT_SERVER}" else "Kein Server eingebaut",
-                color = Fog.Muted, fontSize = 11.sp) })
-        TextButton(onClick = {
-            if (server.isEmpty() || Invite.isValidServer(server)) { prefs.server = server; App.sync.refreshState() }
-        }) { Text("Server übernehmen", color = Fog.Violet2) }
-
-        SectionTitle("Offline-Karte")
-        Text("Gespeichert: ${cacheMb.de(1)} MB", fontSize = 13.sp)
-        Text("Beim Erkunden lädt FoggyMap die Umgebung automatisch im Hintergrund (im WLAN die ganze Stadt, ca. 8 km, " +
-            "mit mobilen Daten ca. 3 km). Danach geht alles auch ohne Netz.", color = Fog.Muted, fontSize = 12.sp, lineHeight = 16.sp)
-        if (area.running) {
-            Spacer(Modifier.height(8.dp))
-            androidx.compose.material3.LinearProgressIndicator(
-                progress = { if (area.total == 0) 0f else area.done.toFloat() / area.total },
-                color = Fog.Cyan, trackColor = Fog.SurfaceHigh, modifier = Modifier.fillMaxWidth())
-            Text("Lade ${area.radiusKm}-km-Umkreis: ${area.done} von ${area.total} Kacheln · ${(area.bytes / 1_048_576.0).de(1)} MB",
-                color = Fog.Muted, fontSize = 12.sp)
-        } else {
-            val here = App.location.collectAsState().value
-            val start = here?.let { LatLon(it.latitude, it.longitude) }
-                ?: prefs.lastLat.takeIf { !it.isNaN() }?.let { LatLon(it, prefs.lastLon) }
-            TextButton(enabled = start != null, onClick = { start?.let { App.ensureArea(it, TileRepository.CITY_RADIUS) } }) {
-                Text("Ganze Stadt herunterladen (12 km Umkreis)", color = Fog.Violet2)
-            }
-            area.message?.let { Text(it, color = Fog.Amber, fontSize = 12.sp) }
-            if (!area.running && area.total > 0 && area.message == null) Text("Fertig: ${area.done} Kacheln geladen.", color = Fog.Success, fontSize = 12.sp)
-        }
-
-        SectionTitle("Daten")
-        TextButton(onClick = { App.tiles.clearCache(); refreshKey++ }) { Text("Offline-Kartendaten löschen", color = Fog.Violet2) }
-        TextButton(onClick = { confirmReset = true }) {
-            Icon(rememberVectorPainter(Icons.Filled.Delete), null, tint = Fog.Danger, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp)); Text("Alle Erkundungsdaten löschen", color = Fog.Danger)
-        }
-
-        SectionTitle("Über")
-        Text("FoggyMap ${BuildConfig.VERSION_NAME}", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-        val update by App.updater.state.collectAsState()
-        if (App.updater.enabled) {
-            TextButton(onClick = { scope.launch { if (App.updater.check(force = true)) App.updater.install() } }) {
-                Text("Nach Updates suchen", color = Fog.Violet2)
-            }
-            when (val u = update) {
-                de.foggymap.app.data.Updater.State.Checking -> Text("Suche …", color = Fog.Muted, fontSize = 12.sp)
-                de.foggymap.app.data.Updater.State.UpToDate -> Text("Du hast die neueste Version.", color = Fog.Success, fontSize = 12.sp)
-                is de.foggymap.app.data.Updater.State.Failed -> Text(u.message, color = Fog.Amber, fontSize = 12.sp)
-                else -> {}
-            }
-        }
-        Text("Kartendaten © OpenStreetMap-Mitwirkende (ODbL) · Karten- und Straßendaten: OpenFreeMap / OpenMapTiles · " +
-            "Kartendarstellung: MapLibre Native · Geometrie: JTS Topology Suite.", color = Fog.Muted, fontSize = 11.sp, lineHeight = 15.sp)
-        TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.openstreetmap.org/copyright"))) }) {
-            Text("OpenStreetMap-Lizenz", color = Fog.Violet2)
-        }
-    }
-
-    if (confirmReset) AlertDialog(
-        onDismissRequest = { confirmReset = false }, containerColor = Fog.Surface, titleContentColor = Fog.Text, textContentColor = Fog.Text,
-        title = { Text("Wirklich alles löschen?") },
-        text = { Text("Alle aufgedeckten Gebiete und Statistiken auf diesem Handy werden gelöscht. Daten in einer Koop-Gruppe bleiben auf dem Server und kommen bei der nächsten Synchronisierung zurück.") },
-        confirmButton = { TextButton(onClick = {
-            confirmReset = false
-            scope.launch {
-                withContext(Dispatchers.IO) { App.db.clear(); App.prefs.resetStatistics() }
-                App.notifyDbChanged()
-                onDataCleared()
-            }
-        }) { Text("Löschen", color = Fog.Danger) } },
-        dismissButton = { TextButton(onClick = { confirmReset = false }) { Text("Abbrechen", color = Fog.Muted) } },
-    )
-}
-
-@Composable
-private fun SwitchRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+internal fun SwitchRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, fontSize = 14.sp)
@@ -506,7 +372,7 @@ private fun SwitchRow(title: String, subtitle: String, checked: Boolean, onChang
 }
 
 @Composable
-private fun PermissionRow(icon: Painter, title: String, state: String, ok: Boolean, onFix: () -> Unit) {
+internal fun PermissionRow(icon: Painter, title: String, state: String, ok: Boolean, onFix: () -> Unit) {
     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = onFix).padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = Fog.Lavender, modifier = Modifier.size(20.dp))

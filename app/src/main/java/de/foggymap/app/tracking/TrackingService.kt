@@ -71,6 +71,9 @@ class TrackingService : Service() {
     private val failures = HashMap<CellKey, Pair<Int, Long>>()   // attempts, retry-at (elapsed ms)
     /** Building footprints of the loaded cells (same tiles as the streets, no extra download). */
     private val cellBuildings = HashMap<CellKey, kotlinx.coroutines.Deferred<List<BuildingFootprint>>>()
+    /** "Radius" mode: area around the path, straight from GPS (needs no map data). */
+    private val radius = de.foggymap.app.core.RadiusRevealer()
+    private val buildingsChecked = HashSet<CellKey>()
     private var areaRequested = false
 
     // Battery profile state
@@ -117,6 +120,7 @@ class TrackingService : Service() {
         }
         if (intent?.action == ACTION_SETTINGS_CHANGED) {
             locations.configure(App.prefs.batteryMode)
+            scope.launch { explorer?.settings = App.prefs.revealSettings(); radius.reset() }
             if (!App.prefs.shareLiveLocation) App.scope.launch { App.sync.clearLive() }
             return START_STICKY
         }
@@ -143,7 +147,7 @@ class TrackingService : Service() {
         App.trail.value = emptyList()
         scope.launch {
             val known = withContext(Dispatchers.IO) { App.db.roadIds() }
-            explorer = Explorer(known)
+            explorer = Explorer(known).also { it.settings = App.prefs.revealSettings() }
             if (BuildConfig.DEBUG) explorer?.matcher?.debug = { android.util.Log.d("FoggyMatcher", it) }
             restoreQueue()
             locations.lastKnown()?.let { last -> prefetch(LatLon(last.latitude, last.longitude)) }
@@ -171,6 +175,7 @@ class TrackingService : Service() {
                 if (loc.hasBearing() && loc.hasSpeed() && loc.speed > 1f) loc.bearing.toDouble() else null)
             enqueue(fix)
             if (fix.accuracy <= 35.0) publishTrail(fix.pos)
+            if (App.prefs.revealMode == de.foggymap.app.core.RevealMode.RADIUS) revealRadius(fix)
             fix.bearing?.let { lastHeading = it }
             updateProfile(fix, loc)
         }
@@ -253,6 +258,7 @@ class TrackingService : Service() {
                                 "${SystemClock.elapsedRealtime() - t0} ms (cache=${result.fromCache})")
                         }
                         App.scope.launch { App.refreshCoverage() }
+                        if (buildingsChecked.add(cell)) completeBuildings(cell, result.value)
                         // Only now the surroundings are fetched in the background – never competing with the cell you need.
                         if (!areaRequested) { areaRequested = true; App.ensureArea(cell.core().center) }
                         explorer?.let { drain(it) }
@@ -288,6 +294,32 @@ class TrackingService : Service() {
             if (candidates.isEmpty()) return@launch
             val existing = App.db.buildingsIntersecting(box)
             val items = BuildingRevealer.reveal(candidates, areas, existing)
+            withContext(serial) { storeBuildings(items) }
+        }
+    }
+
+    /** "Radius" mode: reveal the circle around you right away – no map data needed. */
+    private suspend fun revealRadius(fix: Fix) {
+        val items = radius.onFix(fix, App.prefs.revealRadius.toDouble())
+        if (items.isEmpty()) return
+        val added = withContext(Dispatchers.IO) { App.db.insert(items, RevealDatabase.OWNER_ME, synced = false) }
+        if (added.isEmpty()) return
+        App.notifyDbChanged(); App.sync.requestSync()
+        revealBuildingsFor(added)
+    }
+
+    /**
+     * When a cell's data arrives: buildings for ground that was revealed before the data was there
+     * (radius mode while loading, offline walks, areas from the group).
+     */
+    private fun completeBuildings(cell: CellKey, data: TileRepository.Cell) {
+        App.scope.launch(Dispatchers.Default) {
+            val buildings = data.buildings.await()
+            val box = cell.core()
+            val areas = App.db.areasIntersecting(box)
+            if (areas.isEmpty() || buildings.isEmpty()) return@launch
+            val existing = App.db.buildingsIntersecting(cell.queryBox())
+            val items = BuildingRevealer.reveal(buildings.filter { b -> b.ring.any { box.contains(it) } }, areas, existing)
             withContext(serial) { storeBuildings(items) }
         }
     }

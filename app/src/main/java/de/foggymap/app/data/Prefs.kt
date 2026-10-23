@@ -48,6 +48,23 @@ class Prefs(context: Context) {
         get() = p.getBoolean("perspective", true)
         set(v) = p.edit().putBoolean("perspective", v).apply()
 
+    // ------------------------------------------------------------ what gets revealed
+
+    var revealMode: de.foggymap.app.core.RevealMode
+        get() = runCatching { de.foggymap.app.core.RevealMode.valueOf(p.getString("reveal_mode", "BLOCKS")!!) }.getOrDefault(de.foggymap.app.core.RevealMode.BLOCKS)
+        set(v) = p.edit().putString("reveal_mode", v.name).apply()
+    /** Strip width per side in the "Straßenzug" mode (m). */
+    var stripWidth: Int
+        get() = p.getInt("strip_width", 40)
+        set(v) = p.edit().putInt("strip_width", v).apply()
+    /** Radius around your path in the "Radius" mode (m). */
+    var revealRadius: Int
+        get() = p.getInt("reveal_radius", 60)
+        set(v) = p.edit().putInt("reveal_radius", v).apply()
+
+    fun revealSettings() = de.foggymap.app.core.RevealSettings(revealMode,
+        (if (revealMode == de.foggymap.app.core.RevealMode.RADIUS) revealRadius else stripWidth).toDouble())
+
     // ------------------------------------------------------------ offline map area
 
     /** Centre/radius/time of the last completed background download of the surroundings. */
