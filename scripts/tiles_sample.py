@@ -5,6 +5,7 @@ import json, math, os, sys, time, urllib.parse, urllib.request
 
 UA = "FoggyMap-CI/1.0 (+https://github.com/JustFunLP/FoggyMap; test fixtures)"
 OUT = sys.argv[1] if len(sys.argv) > 1 else "tiles-sample"
+MODE = sys.argv[2] if len(sys.argv) > 2 else "all"   # tiles | overpass | all
 AREAS = {
     "helsinki": (60.1716, 24.9443),
     "solingen": (51.1755, 7.0845),
@@ -18,7 +19,7 @@ def get(url, data=None, tries=4):
     for k in range(tries):
         try:
             req = urllib.request.Request(url, data=data, headers={"User-Agent": UA, "Accept-Encoding": "identity"})
-            with urllib.request.urlopen(req, timeout=180) as r:
+            with urllib.request.urlopen(req, timeout=100) as r:
                 return r.read()
         except Exception as e:  # noqa
             print(f"  retry {url[:80]} ({e})")
@@ -59,6 +60,24 @@ way["building"]({b});
 out tags geom qt;"""
 
 os.makedirs(OUT, exist_ok=True)
+if MODE == "overpass":
+    meta = json.load(open(f"{OUT}/meta.json"))
+    for name, a in meta["areas"].items():
+        q = a["queryBox"]
+        bb = f"{q[0]:.6f},{q[1]:.6f},{q[2]:.6f},{q[3]:.6f}"
+        for kind, tpl in (("roads", ROADS), ("buildings", BUILDINGS)):
+            body = urllib.parse.urlencode({"data": tpl.replace("{b}", bb)}).encode()
+            for ep in ("https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter", "https://maps.mail.ru/osm/tools/overpass/api/interpreter"):
+                try:
+                    t0 = time.time()
+                    js = get(ep, body, tries=1)
+                    print(name, kind, ep.split("/")[2], f"{time.time()-t0:.0f}s", len(js))
+                    if b'"elements"' in js:
+                        open(f"{OUT}/{name}/overpass_{kind}.json", "wb").write(js)
+                        break
+                except SystemExit as e:
+                    print(e)
+    sys.exit(0)
 tilejson = json.loads(get("https://tiles.openfreemap.org/planet"))
 json.dump(tilejson, open(f"{OUT}/tilejson.json", "w"), indent=1)
 template = tilejson["tiles"][0]
@@ -79,18 +98,6 @@ for name, (lat, lon) in AREAS.items():
             open(f"{d}/{Z}_{x}_{y}.pbf", "wb").write(raw)
             sizes.append(len(raw))
     q = expand(bounds(cx, cy), 400)
-    bb = f"{q[0]:.6f},{q[1]:.6f},{q[2]:.6f},{q[3]:.6f}"
-    for kind, tpl in (("roads", ROADS), ("buildings", BUILDINGS)):
-        body = urllib.parse.urlencode({"data": tpl.replace("{b}", bb)}).encode()
-        for ep in ("https://overpass-api.de/api/interpreter", "https://overpass.private.coffee/api/interpreter"):
-            try:
-                js = get(ep, body, tries=2)
-                if b'"elements"' in js:
-                    open(f"{d}/overpass_{kind}.json", "wb").write(js)
-                    break
-            except SystemExit as e:
-                print(e)
-        time.sleep(3)
     meta["areas"][name] = {"center": [lat, lon], "tile": [cx, cy], "queryBox": q, "tileBytes": sizes}
     print(name, cx, cy, "tile bytes", sum(sizes))
 json.dump(meta, open(f"{OUT}/meta.json", "w"), indent=1)

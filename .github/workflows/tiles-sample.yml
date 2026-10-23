@@ -9,11 +9,17 @@ permissions:
 jobs:
   sample:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
-      - run: python3 scripts/tiles_sample.py tiles-sample
+      - name: Vector tiles (OpenFreeMap)
+        run: python3 scripts/tiles_sample.py tiles-sample tiles
+      - name: Overpass comparison data
+        timeout-minutes: 25
+        continue-on-error: true
+        run: python3 scripts/tiles_sample.py tiles-sample overpass
       - name: Upload (draft release, members only)
+        if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
