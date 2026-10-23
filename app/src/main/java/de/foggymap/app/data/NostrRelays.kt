@@ -105,11 +105,11 @@ class NostrRelays(val urls: List<String>, private val userAgent: String,
     companion object {
         /** Public relays that accept app data (NIP-78) – checked by the CI relay test. */
         val DEFAULT = listOf(
-            "wss://relay.damus.io",
             "wss://nos.lol",
             "wss://relay.primal.net",
             "wss://nostr.mom",
-            "wss://offchain.pub",
+            "wss://relay.snort.social",
+            "wss://relay.damus.io",
         )
     }
 }

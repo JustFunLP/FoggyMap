@@ -109,9 +109,16 @@ jobs:
 
       - name: Koop relays (network test, never blocks the build)
         continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gradle --no-daemon :app:testDebugUnitTest --tests 'de.foggymap.app.net.*' 2>&1 | tail -30 || true
           cat app/build/relay-check.txt 2>/dev/null || true
+          if [ -f app/build/relay-check.txt ]; then
+            gh release view ui-shots >/dev/null 2>&1 || gh release create ui-shots --draft --title "UI-Screenshots (intern)" --notes "CI-Berichte"
+            cp app/build/test-results/testDebugUnitTest/TEST-de.foggymap.app.net.NostrRelayCheck.xml relay-tests.xml 2>/dev/null || true
+            gh release upload ui-shots app/build/relay-check.txt relay-tests.xml --clobber || true
+          fi
           python3 - <<'PY' || true
           import glob, re, xml.etree.ElementTree as ET
           for f in glob.glob('app/build/test-results/testDebugUnitTest/TEST-de.foggymap.app.net.*.xml'):
