@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -323,13 +324,18 @@ internal fun MapControls(tracking: de.foggymap.app.TrackingUi, groupSize: Int, m
         }
 
         // Bottom: start/stop in the middle, map buttons on the right.
-        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(horizontal = 14.dp, vertical = 12.dp)) {
-            Column(Modifier.align(Alignment.BottomEnd), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // The start button gets the space left of the map buttons, so nothing overlaps on narrow phones.
+        Row(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.Bottom) {
+            Box(Modifier.weight(1f).padding(start = 46.dp), contentAlignment = Alignment.BottomCenter) {
+                StartStopButton(tracking.active, Modifier, onStartStop)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 CompassButton(mapBearing, northUp, onCompass)
                 PerspectiveButton(tilted, onPerspective)
                 LocateButton(following, onLocate)
             }
-            StartStopButton(tracking.active, Modifier.align(Alignment.BottomCenter), onStartStop)
         }
     }
 }
@@ -406,7 +412,7 @@ internal fun PerspectiveButton(tilted: Boolean, onClick: () -> Unit) {
 @Composable
 internal fun StartStopButton(active: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     if (!active) {
-        PrimaryButton("Erkundung starten", modifier.width(230.dp), icon = rememberVectorPainter(Icons.Filled.PlayArrow), onClick = onClick)
+        PrimaryButton("Erkundung starten", modifier.widthIn(max = 240.dp).fillMaxWidth(), icon = rememberVectorPainter(Icons.Filled.PlayArrow), onClick = onClick)
     } else {
         Row(modifier.height(46.dp).clip(RoundedCornerShape(23.dp)).background(Fog.Surface.copy(alpha = 0.92f))
             .border(1.dp, Fog.Line, RoundedCornerShape(23.dp)).clickable(onClick = onClick).padding(horizontal = 16.dp),

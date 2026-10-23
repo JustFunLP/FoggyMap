@@ -92,4 +92,11 @@ class UiScreenshotTest {
             MapControls(TrackingUi(), 0, mapBearing = 0f, northUp = true, tilted = false, following = false, {}, {}, {}, {}, {})
         }
     }
+
+    @Test @Config(qualifiers = "w360dp-h740dp-xhdpi")
+    fun hudStartNarrow() = shot("hud-start-schmal") {
+        Box(Modifier.fillMaxSize().background(mapBackground())) {
+            MapControls(TrackingUi(), 0, mapBearing = 0f, northUp = false, tilted = true, following = true, {}, {}, {}, {}, {})
+        }
+    }
 }
