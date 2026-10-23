@@ -9,7 +9,7 @@ Alles hier geht im Browser bzw. der GitHub-App auf dem Android-Handy. Ein PC ist
 1. Öffne auf dem Handy **github.com/JustFunLP/FoggyMap/releases** (ein GitHub-Konto ist nicht nötig, das Repository ist öffentlich).
 2. Tippe bei **„FoggyMap – neueste Version“** unter *Assets* auf **FoggyMap.apk**.
 3. Nach dem Download auf die Datei tippen. Android fragt beim ersten Mal, ob dein Browser Apps installieren darf: **„Zulassen“** → zurück → **Installieren**.
-4. **Updates kommen danach von selbst:** Beim Öffnen prüft FoggyMap, ob es eine neuere Version gibt, und fragt *„Update verfügbar – Installieren?“*. Beim allerersten Update bittet Android einmalig um die Erlaubnis *„Apps aus dieser Quelle zulassen“* für FoggyMap. Die neue Version wird **über** die alte installiert, deine Erkundung bleibt erhalten (gleicher Signierschlüssel, die Datei wird vor der Installation per Prüfsumme kontrolliert). Von Hand: ⚙ → **„Nach Updates suchen“**.
+4. **Updates kommen danach von selbst:** Beim Öffnen prüft FoggyMap, ob es eine neuere Version gibt, und fragt *„Update verfügbar – Installieren?“*. Beim allerersten Update bittet Android einmalig um die Erlaubnis *„Apps aus dieser Quelle zulassen“* für FoggyMap. Die neue Version wird **über** die alte installiert, deine Erkundung bleibt erhalten (gleicher Signierschlüssel, die Datei wird vor der Installation per Prüfsumme kontrolliert). Von Hand: Menü → App → **„Prüfen“**.
 
 > Google Play Protect kann warnen („Unbekannte App“). Das ist bei selbst gebauten Apps normal: *Weitere Details → Trotzdem installieren*.
 
@@ -21,14 +21,18 @@ Alles hier geht im Browser bzw. der GitHub-App auf dem Android-Handy. Ein PC ist
    - Benachrichtigungen: **Zulassen** (zeigt, dass aufgezeichnet wird).
 3. Losgehen, -radeln oder -fahren. Sobald du eine Straße betrittst, verschwindet der Nebel über dem ganzen Abschnitt bis zur nächsten Kreuzung und über den angrenzenden Häuserblöcken.
 4. Das Handy darf in die Tasche, der Bildschirm darf aus sein. Beenden über **„Erkundung beenden“** oder in der Benachrichtigung.
-5. **Standort-Knopf** (unten rechts über der Karte): Ein Tipp fixiert die Karte auf dich und dreht deine Blickrichtung nach oben (beim Rad- und Autofahren die Fahrtrichtung). Verschiebst du die Karte mit dem Finger, löst sich das. Zoomen geht, ohne dass es sich löst. 3D-Neigung an/aus: ⚙ → Darstellung.
+5. **Standort-Knopf** (unten rechts über der Karte): Ein Tipp fixiert die Karte auf dich und dreht deine Blickrichtung nach oben (beim Rad- und Autofahren die Fahrtrichtung). Verschiebst du die Karte mit dem Finger, löst sich das. Zoomen geht, ohne dass es sich löst.
+6. **Menü** (oben rechts) mit drei Reitern:
+   - **Erkunden:** Was wird aufgedeckt? *Häuserblöcke* (Stadt), *Straßenzug* (Streifen links und rechts, Breite einstellbar, ideal im Dorf) oder *Umkreis* (Radius um deinen Weg, sofort, auch ohne Kartendaten). Dazu Akku & GPS, 3D-Ansicht und Offline-Karte.
+   - **Koop:** Gruppe erstellen oder beitreten, Mitglieder, Live-Standort.
+   - **App:** Updates, Berechtigungen, Daten löschen.
 
 **Tipps**
 - Dein Weg erscheint sofort als Leuchtspur. Die Straßendaten kommen nach ein, zwei Sekunden, dann löst sich der Nebel über der Straße auf.
-- Beim Erkunden lädt die App die Umgebung im Hintergrund (im WLAN die ganze Stadt, ca. 8 km). Wer vorab alles will: ⚙ → **Offline-Karte → Ganze Stadt herunterladen**. Danach geht alles ohne Netz.
+- Beim Erkunden lädt die App die Umgebung im Hintergrund (im WLAN die ganze Stadt, ca. 8 km). Wer vorab alles will: Menü → Erkunden → **Ganze Stadt herunterladen**. Danach geht alles ohne Netz.
 - Ohne Internet läuft die Aufzeichnung weiter. Die Wege werden gespeichert und aufgedeckt, sobald die Kartendaten geladen werden können.
-- Samsung/Xiaomi/Huawei: Falls die Aufzeichnung im Hintergrund stoppt, in FoggyMap → ⚙ → *Akku-Optimierung* die App auf „Nicht eingeschränkt“ stellen.
-- Akku: ⚙ → *Akku & GPS* → „Ausgewogen“ (Standard) oder „Sparsam“.
+- Samsung/Xiaomi/Huawei: Falls die Aufzeichnung im Hintergrund stoppt, Menü → App → *Akku-Optimierung* auf „Nicht eingeschränkt“ stellen.
+- Akku: Menü → Erkunden → *Akku & GPS* → „Ausgewogen“ (Standard) oder „Sparsam“.
 
 ---
 
@@ -61,7 +65,7 @@ Für das gemeinsame Spielen braucht ihr einen kleinen Server. Empfohlen ist **Cl
    `server/cloudflare/dashboard-worker.js` aus diesem Repository einfügen. Am Handy geht das so: Datei auf GitHub öffnen → **Raw** → alles markieren → kopieren. Dann **Deploy**.
 5. **Datenbank verbinden:** Worker → **Settings** → **Bindings** → **Add** → **D1 database** → Variable name **`DB`** → Datenbank `foggymap` → **Save/Deploy**.
 6. Die Adresse `https://foggymap-sync.<name>.workers.dev` öffnen. Es muss `{"ok":true,...}` erscheinen.
-7. In der App: **Koop** → Feld **Server-Adresse** → diese Adresse eintragen (nur der Gruppenersteller; wer per Einladung beitritt, bekommt sie automatisch).
+7. In der App: **Menü → Koop** → Feld **Server-Adresse** → diese Adresse eintragen (nur der Gruppenersteller; wer per Einladung beitritt, bekommt sie automatisch).
 
 ### Weg C: eigener Server (für Technikaffine)
 `server/docker-compose.yml` startet den Node.js-Server mit SQLite und automatischem HTTPS über Caddy:
@@ -71,13 +75,13 @@ Für das gemeinsame Spielen braucht ihr einen kleinen Server. Empfohlen ist **Cl
 
 ## 4. Mit Kollegen spielen
 
-1. **Du:** FoggyMap → oben **Koop** → Anzeigename und Gruppenname eintragen → **Gruppe erstellen**.
+1. **Du:** FoggyMap → oben **Menü** → **Koop** → Anzeigename und Gruppenname eintragen → **Gruppe erstellen**.
 2. Auf das **Teilen-Symbol** neben dem Code tippen und die Einladung z. B. per WhatsApp verschicken.
 3. **Die APK an Kollegen geben:** Schicke ihnen den Link **github.com/JustFunLP/FoggyMap/releases** (sie brauchen kein GitHub-Konto) und lass sie wie in Abschnitt 1 installieren. Danach aktualisiert sich die App auch bei ihnen von selbst.
-4. **Kollege:** APK installieren → App öffnen → **Koop** → die komplette Einladungsnachricht in das Feld *„Einladung einfügen“* kopieren (oder in WhatsApp lange auf die Nachricht tippen → **Teilen → FoggyMap**) → **Beitreten**.
+4. **Kollege:** APK installieren → App öffnen → **Menü → Koop** → die komplette Einladungsnachricht in das Feld *„Einladung einfügen“* kopieren (oder in WhatsApp lange auf die Nachricht tippen → **Teilen → FoggyMap**) → **Beitreten**.
 5. Ab jetzt sehen alle, was jeder aufdeckt. Synchronisiert wird automatisch alle paar Minuten, nach neuen Funden und sobald wieder Internet da ist.
 
-**Was wird geteilt?** Nur aufgedeckte Flächen, Kilometerzahlen und der Anzeigename. Der GPS-Verlauf wird nie übertragen. Den Live-Standort sehen andere nur, wenn du ihn in *Koop → Live-Standort* ausdrücklich einschaltest. Er verfällt nach 10 Minuten.
+**Was wird geteilt?** Nur aufgedeckte Flächen, Kilometerzahlen und der Anzeigename. Der GPS-Verlauf wird nie übertragen. Den Live-Standort sehen andere nur, wenn du ihn in *Menü → Koop → Live-Standort* ausdrücklich einschaltest. Er verfällt nach 10 Minuten.
 
 ---
 
@@ -87,6 +91,6 @@ Für das gemeinsame Spielen braucht ihr einen kleinen Server. Empfohlen ist **Cl
 |---|---|
 | „Kartendaten: …“ / „Offline …“ | Kein Netz oder der Kartenserver ist kurz nicht erreichbar. Die App versucht es nach wenigen Sekunden erneut, deine Wege gehen nicht verloren. |
 | Nichts wird aufgedeckt | GPS-Genauigkeit oben in der Statuszeile prüfen. Über ±35 m (z. B. drinnen) wird absichtlich nichts aufgedeckt. |
-| Aufzeichnung stoppt im Hintergrund | ⚙ → Akku-Optimierung → „Nicht eingeschränkt“. Bei Xiaomi zusätzlich „Autostart“ erlauben. |
+| Aufzeichnung stoppt im Hintergrund | Menü → App → Akku-Optimierung → „Nicht eingeschränkt“. Bei Xiaomi zusätzlich „Autostart“ erlauben. |
 | Koop: „Server nicht erreichbar“ | Server-Adresse prüfen (muss mit `https://` beginnen). Beim Cloudflare-Weg B die D1-Bindung `DB` prüfen. |
 | Workflow „Koop-Server“ schlägt fehl | In der Zusammenfassung steht der Grund. Meist fehlen Secrets oder die workers.dev-Subdomain (Schritt 2). |
