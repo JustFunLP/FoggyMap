@@ -15,33 +15,35 @@ import androidx.core.content.ContextCompat
 import androidx.core.location.LocationListenerCompat
 import androidx.core.location.LocationManagerCompat
 import androidx.core.location.LocationRequestCompat
-import de.foggymap.app.data.BatteryMode
 
 /**
- * Battery-aware location subscription.
+ * Battery-aware location subscription. There are no settings: the rate follows how you move.
  *
- * Where the energy goes and what we do about it:
- *  - GPS while standing still is the biggest waste → after ~2.5 min without movement GPS is switched
- *    off. Then only (a) a low-power Wi-Fi/cell fix, (b) positions other apps request anyway
- *    (passive, free) and (c) a short single GPS fix every 45–90 s are used. The hardware
- *    "significant motion" sensor (practically free) wakes GPS immediately when you walk on;
+ *  - Moving: on foot every 3 s / 4 m, by car every 2 s / 10 m.
+ *  - Standing for ~30 s (traffic light, shop window): GPS throttled to one fix every 10 s.
+ *  - Standing for ~2.5 min – or ~40 s at a place where you often stand ([de.foggymap.app.core.RestSpots]) –
+ *    GPS is switched off. Then only (a) a low-power Wi-Fi/cell fix, (b) positions other apps request
+ *    anyway (passive, free) and (c) a short single GPS fix every 45 s (90 s at a known place) are used.
+ *    The hardware "significant motion" sensor (practically free) wakes GPS as soon as you walk on;
  *    the GPS samples catch cases the sensor misses (car, bike, phones without that sensor).
  *  - No GPS signal for minutes (indoors, underground) → also drop to low power instead of letting
  *    the receiver search forever.
- *  - Update rate follows the speed: on foot every 3 s / 4 m, by car every 2 s / 10 m.
  *  - Screen off → fixes are *batched* by the location hardware (Android 12+): the phone's main
- *    processor wakes only every 10–30 s to receive a whole batch. Matching works on the batch
+ *    processor wakes only every 10–15 s to receive a whole batch. Matching works on the batch
  *    because every fix carries its own timestamp.
  */
 class LocationController(private val context: Context, private val onLocations: (List<Location>) -> Unit) {
-    enum class Profile(val label: String) { FAST("GPS aktiv"), MOVING("GPS aktiv"), STILL("GPS-Pause (Stillstand)") }
+    enum class Profile(val label: String) {
+        FAST("GPS aktiv (Fahrt)"), MOVING("GPS aktiv"), SLOW("GPS gedrosselt (kurzer Halt)"), STILL("GPS-Pause (Stillstand)")
+    }
 
     private val lm = context.getSystemService(LocationManager::class.java)
     private val sensors = context.getSystemService(SensorManager::class.java)
     private val main = Handler(Looper.getMainLooper())
     private var profile: Profile? = null
-    private var mode: BatteryMode = BatteryMode.BALANCED
     private var screenOn = true
+    /** Paused at a place where you often stand: check less often. */
+    var atKnownPlace = false
     private var subscribed = false
     var onSignificantMotion: (() -> Unit)? = null
 
@@ -81,11 +83,7 @@ class LocationController(private val context: Context, private val onLocations: 
         }
     }
 
-    private fun probeInterval(): Long = when (mode) {
-        BatteryMode.PRECISE -> 20_000
-        BatteryMode.BALANCED -> 45_000
-        BatteryMode.SAVER -> 90_000
-    }
+    private fun probeInterval(): Long = if (atKnownPlace) 90_000 else 45_000
 
     private val motion = object : TriggerEventListener() {
         override fun onTrigger(event: TriggerEvent?) { main.post { onSignificantMotion?.invoke() } }
@@ -93,9 +91,9 @@ class LocationController(private val context: Context, private val onLocations: 
 
     val current get() = profile
 
-    fun configure(mode: BatteryMode, screenOn: Boolean = this.screenOn) {
-        val changed = mode != this.mode || screenOn != this.screenOn
-        this.mode = mode; this.screenOn = screenOn
+    fun configure(screenOn: Boolean) {
+        val changed = screenOn != this.screenOn
+        this.screenOn = screenOn
         if (changed) profile?.let { apply(it, force = true) }
     }
 
@@ -105,7 +103,7 @@ class LocationController(private val context: Context, private val onLocations: 
         profile = p
         stopUpdates()
         val params = params(p)
-        val batch = if (batchingAllowed && !screenOn && mode != BatteryMode.PRECISE && p != Profile.STILL) params.interval * params.batchFactor else 0L
+        val batch = if (batchingAllowed && !screenOn && p != Profile.STILL) params.interval * params.batchFactor else 0L
         batchDelayMs = batch
         lastDelivery = android.os.SystemClock.elapsedRealtime()
         val request = LocationRequestCompat.Builder(params.interval)
@@ -125,13 +123,12 @@ class LocationController(private val context: Context, private val onLocations: 
                 subscribed = true
             } catch (_: Exception) { subscribed = false }
         }
+        if (p == Profile.STILL || p == Profile.SLOW) armMotionSensor() else disarmMotionSensor()
         if (p == Profile.STILL) {
-            armMotionSensor()
             startPassive()
             main.removeCallbacks(probe)
             main.postDelayed(probe, probeInterval())
         } else {
-            disarmMotionSensor()
             stopStillHelpers()
         }
     }
@@ -201,25 +198,16 @@ class LocationController(private val context: Context, private val onLocations: 
 
     private data class Params(val interval: Long, val minDistance: Float, val quality: Int, val batchFactor: Long)
 
-    private fun params(p: Profile): Params = when (mode) {
-        BatteryMode.PRECISE -> when (p) {
-            Profile.FAST -> Params(1000, 5f, LocationRequestCompat.QUALITY_HIGH_ACCURACY, 1)
-            Profile.MOVING -> Params(1500, 2f, LocationRequestCompat.QUALITY_HIGH_ACCURACY, 1)
-            Profile.STILL -> Params(15_000, 15f, LocationRequestCompat.QUALITY_BALANCED_POWER_ACCURACY, 1)
-        }
-        BatteryMode.BALANCED -> when (p) {
-            Profile.FAST -> Params(2000, 10f, LocationRequestCompat.QUALITY_HIGH_ACCURACY, 5)
-            Profile.MOVING -> Params(3000, 4f, LocationRequestCompat.QUALITY_HIGH_ACCURACY, 5)
-            Profile.STILL -> Params(30_000, 30f, LocationRequestCompat.QUALITY_LOW_POWER, 1)
-        }
-        // GPS stays switched on between fixes shorter than ~10 s anyway, so rarer fixes save little energy
-        // but leave gaps (short streets passed by car got no fix). Saver mode saves by bigger batches
-        // (fewer wake-ups of the main processor) and longer pauses when standing.
-        BatteryMode.SAVER -> when (p) {
-            Profile.FAST -> Params(2000, 10f, LocationRequestCompat.QUALITY_HIGH_ACCURACY, 12)
-            Profile.MOVING -> Params(3000, 5f, LocationRequestCompat.QUALITY_HIGH_ACCURACY, 10)
-            Profile.STILL -> Params(60_000, 50f, LocationRequestCompat.QUALITY_LOW_POWER, 1)
-        }
+    // GPS stays switched on between fixes shorter than ~10 s anyway, so rarer fixes while moving save little
+    // energy but leave gaps (short streets passed by car got no fix). Savings come from batching (fewer
+    // wake-ups of the main processor), throttling during short stops and pausing during long ones.
+    // No minimum distance while GPS is on: fixes keep coming while you stand, which is how standing still
+    // is recognised (and a silent receiver really means "no signal" or broken batching).
+    private fun params(p: Profile): Params = when (p) {
+        Profile.FAST -> Params(2000, 0f, LocationRequestCompat.QUALITY_HIGH_ACCURACY, 6)
+        Profile.MOVING -> Params(3000, 0f, LocationRequestCompat.QUALITY_HIGH_ACCURACY, 5)
+        Profile.SLOW -> Params(10_000, 0f, LocationRequestCompat.QUALITY_HIGH_ACCURACY, 3)
+        Profile.STILL -> Params(30_000, 30f, LocationRequestCompat.QUALITY_LOW_POWER, 1)
     }
 
     private fun armMotionSensor() {

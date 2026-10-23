@@ -76,15 +76,27 @@ shot 03-ziel
 # Move the map away by hand, then the location button brings it back (position fixed, viewing direction up).
 SIZE=$(adb shell wm size | grep -oE '[0-9]+x[0-9]+' | tail -1); W=${SIZE%x*}; H=${SIZE#*x}
 adb shell input swipe $((W/2)) $((H*40/100)) $((W/2)) $((H*20/100)) 400; sleep 6; shot 03b-verschoben
-adb shell "dumpsys activity top" > /dev/null 2>&1 || true
-LOC_Y=$(( H * 70 / 100 ))
-adb shell input tap $((W*88/100)) $LOC_Y; sleep 8; shot 03c-standort
+# Buttons are found by their accessibility label (layout independent).
+tap_attr() {   # tap_attr <content-desc|text> <prefix>
+  adb shell uiautomator dump /sdcard/ui.xml > /dev/null 2>&1
+  adb pull /sdcard/ui.xml /tmp/ui.xml > /dev/null 2>&1
+  local b
+  b=$(grep -oE "$1=\"$2[^\"]*\"[^>]*bounds=\"\[[0-9]+,[0-9]+\]\[[0-9]+,[0-9]+\]\"" /tmp/ui.xml | head -1 | grep -oE '[0-9]+' | tail -4 | tr '\n' ' ')
+  if [ -z "$b" ]; then echo "UI element '$2' not found"; return 1; fi
+  set -- $b
+  adb shell input tap $(( ($1 + $3) / 2 )) $(( ($2 + $4) / 2 ))
+}
+tap_desc() { tap_attr content-desc "$1"; }
+tap_text() { tap_attr text "$1"; }
+tap_desc "Auf meinen Standort" || tap_desc "Karte folgt dir" || true; sleep 8; shot 03c-standort
+tap_desc "Karte nach Norden" || true; sleep 4; shot 03d-norden
+tap_desc "Zur 2D" || true; sleep 4; shot 03e-2d
+tap_desc "Zur 3D" || true; sleep 2
 
-# Statistics sheet: tap the bottom card (screen-size independent: 80 % height, centre).
-SIZE=$(adb shell wm size | grep -oE '[0-9]+x[0-9]+' | tail -1); W=${SIZE%x*}; H=${SIZE#*x}
-adb shell input tap $((W/2)) $((H*76/100)); sleep 3; shot 04-statistik
+# Menu → Info (statistics and GPS state), then Koop.
+tap_desc "Menü" || tap_text "Menü" || true; sleep 3; shot 04-info
 adb shell input keyevent KEYCODE_BACK; sleep 2
-adb shell input tap $((W*73/100)) $((H*85/1000)); sleep 3; shot 05-koop
+tap_desc "Menü" || tap_text "Menü" || true; sleep 2; tap_text "Koop" || true; sleep 2; shot 05-koop
 adb shell input keyevent KEYCODE_BACK; sleep 1
 
 # Give the app a moment to upload the last reveals (sync is debounced by ~20 s).
@@ -117,6 +129,9 @@ if failed: summary.append("Fehlgeschlagene Ladeversuche: " + "; ".join(failed[:3
 follow = [l.split("FoggyMap: ")[-1] for l in log if "ui: camera" in l]
 if follow: summary.append("Kamera zuletzt: " + follow[-1])
 summary.append(f"App-Absturz im Log: {'JA' if crash else 'nein'}")
+import re
+profiles = re.findall(r"gps profile -> (\w+)", "\n".join(log))
+summary.append("GPS-Stufen: " + (" → ".join(profiles[-8:]) if profiles else "keine Wechsel"))
 fog_updates = sum(1 for l in log if "fog updated" in l)
 summary.append(f"Nebel-Aktualisierungen der Karte: {fog_updates}")
 counts = {}

@@ -52,6 +52,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -77,7 +78,6 @@ import de.foggymap.app.Coverage
 import de.foggymap.app.R
 import de.foggymap.app.core.Invite
 import de.foggymap.app.core.TravelMode
-import de.foggymap.app.data.BatteryMode
 import de.foggymap.app.data.RevealDatabase
 import de.foggymap.app.data.SyncUi
 import kotlinx.coroutines.Dispatchers
@@ -99,58 +99,103 @@ internal fun FogSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.()
     }
 }
 
-// =================================================================== statistics
+// =================================================================== info (statistics + what GPS is doing)
+
+/** Everything that used to sit on the map: progress, this tour, GPS state, totals. */
+@Composable
+internal fun InfoTab(sync: SyncUi) {
+    val prefs = App.prefs
+    val tracking by App.tracking.collectAsState()
+    val coverage by App.coverage.collectAsState()
+    val dbVersion by App.dbVersion.collectAsState()
+    val counts by produceState<RevealDatabase.Counts?>(null, dbVersion) { value = withContext(Dispatchers.IO) { App.db.counts() } }
+    val c = counts ?: RevealDatabase.Counts(0, 0.0, 0, 0, 0, 0, 0.0, 0)
+
+    Spacer(Modifier.height(8.dp))
+    GlassCard(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text("${(coverage?.percent ?: 0.0).de(1)} %", fontSize = 34.sp, fontWeight = FontWeight.Bold, color = Fog.Text)
+            Spacer(Modifier.width(10.dp))
+            Text("deiner Umgebung erkundet", color = Fog.Muted, fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp))
+        }
+        Spacer(Modifier.height(8.dp))
+        AccentProgress(((coverage?.percent ?: 0.0) / 100).toFloat(), height = 8.dp)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            if (coverage == null) "Sobald du losgehst, lädt FoggyMap die Straßen deiner Umgebung."
+            else "${(coverage!!.exploredMeters / 1000).de(1)} von ${(coverage!!.totalMeters / 1000).de(1)} Straßenkilometern in den geladenen Kartenkacheln.",
+            color = Fog.Muted, fontSize = 12.sp, lineHeight = 16.sp)
+    }
+
+    SectionTitle(if (tracking.active) "Gerade unterwegs" else "Erkundung")
+    GlassCard(Modifier.fillMaxWidth()) {
+        if (!tracking.active) {
+            Text("Die Erkundung ist aus. GPS ist aus.", fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(4.dp))
+            Text("Starte sie unten auf der Karte. Das GPS passt sich dann von selbst an, wie du dich bewegst.",
+                color = Fog.Muted, fontSize = 12.sp, lineHeight = 16.sp)
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Diese Tour", color = Fog.Muted, fontSize = 12.sp)
+                    Text("${tracking.sessionSegments.de()} Abschnitte · ${(tracking.sessionMeters / 1000).de(2)} km", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            val acc = tracking.accuracy
+            InfoLine(painterResource(R.drawable.ic_compass), "GPS-Genauigkeit",
+                if (acc == null) "sucht …" else "±${acc.toInt()} m" + if (acc > 35f) " (zu ungenau, es wird nichts aufgedeckt)" else "",
+                if (acc == null || acc > 35f) Fog.Amber else Fog.Success)
+            InfoLine(painterResource(when (tracking.mode) { TravelMode.CAR -> R.drawable.ic_car; TravelMode.BIKE -> R.drawable.ic_bike; else -> R.drawable.ic_walk }),
+                "Unterwegs", modeLabel(tracking.mode), Fog.Lavender)
+            InfoLine(painterResource(R.drawable.ic_battery), "GPS", tracking.powerProfile.ifEmpty { "GPS aktiv" }, Fog.Lavender)
+            if (tracking.loadingMap) InfoLine(painterResource(R.drawable.ic_cloud), "Karte", "lädt Straßen …", Fog.Cyan)
+            tracking.message?.let { InfoLine(rememberVectorPainter(Icons.Filled.Info), "Hinweis", it, Fog.Amber) }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("Es gibt keine GPS-Einstellungen: In Bewegung misst FoggyMap alle 2–3 Sekunden. Stehst du etwa 30 Sekunden, " +
+            "wird gedrosselt, nach 2,5 Minuten pausiert das GPS. An Orten, an denen du oft stehst (z. B. Zuhause), pausiert es schon nach 40 Sekunden. " +
+            "Diese Orte merkt sich nur dein Handy.", color = Fog.Muted, fontSize = 11.sp, lineHeight = 15.sp)
+    }
+
+    SectionTitle("Aufgedeckt")
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        StatTile("${c.roadKm.de(1)} km", "Straßen erkundet", painterResource(R.drawable.ic_road), Modifier.weight(1f))
+        StatTile(c.roads.de(), "Straßenabschnitte", painterResource(R.drawable.ic_compass), Modifier.weight(1f))
+    }
+    Spacer(Modifier.height(10.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        StatTile(c.blocks.de(), "Häuserblöcke", painterResource(R.drawable.ic_blocks), Modifier.weight(1f))
+        StatTile(c.buildings.de(), "Gebäude sichtbar", painterResource(R.drawable.ic_building), Modifier.weight(1f))
+    }
+    if (sync.inGroup) {
+        Spacer(Modifier.height(10.dp))
+        Text("Davon selbst erkundet: ${c.ownRoads.de()} Abschnitte · ${c.ownRoadKm.de(1)} km", color = Fog.Muted, fontSize = 12.sp)
+    }
+    SectionTitle("Unterwegs")
+    val walk = prefs.distance(TravelMode.WALK); val bike = prefs.distance(TravelMode.BIKE); val car = prefs.distance(TravelMode.CAR)
+    val total = walk + bike + car
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        StatTile("${(total / 1000).de(1)} km", "zurückgelegt", rememberVectorPainter(Icons.Filled.LocationOn), Modifier.weight(1f))
+        StatTile(formatDuration(prefs.trackedSeconds), "Erkundungszeit", painterResource(R.drawable.ic_clock), Modifier.weight(1f))
+    }
+    Spacer(Modifier.height(12.dp))
+    ModeRow(painterResource(R.drawable.ic_walk), "Zu Fuß", walk, total)
+    ModeRow(painterResource(R.drawable.ic_bike), "Fahrrad", bike, total)
+    ModeRow(painterResource(R.drawable.ic_car), "Auto", car, total)
+    if (sync.inGroup && sync.members.isNotEmpty()) {
+        SectionTitle("Gruppe „${sync.groupName}“")
+        sync.members.sortedByDescending { it.km }.forEachIndexed { i, m -> MemberRow(i, m.name, m.km, m.roads, m.isMe, m.live != null) }
+    }
+}
 
 @Composable
-fun StatsSheet(counts: RevealDatabase.Counts?, coverage: Coverage?, sync: SyncUi, onDismiss: () -> Unit) {
-    val prefs = App.prefs
-    val c = counts ?: RevealDatabase.Counts(0, 0.0, 0, 0, 0, 0, 0.0, 0)
-    FogSheet(onDismiss) {
-        Text("Deine Statistiken", fontSize = 22.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(14.dp))
-        GlassCard(Modifier.fillMaxWidth()) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text("${(coverage?.percent ?: 0.0).de(1)} %", fontSize = 34.sp, fontWeight = FontWeight.Bold, color = Fog.Text)
-                Spacer(Modifier.width(10.dp))
-                Text("deiner Umgebung erkundet", color = Fog.Muted, fontSize = 13.sp, modifier = Modifier.padding(bottom = 6.dp))
-            }
-            Spacer(Modifier.height(8.dp))
-            AccentProgress(((coverage?.percent ?: 0.0) / 100).toFloat(), height = 8.dp)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                if (coverage == null) "Sobald du losgehst, lädt FoggyMap die Straßen deiner Umgebung (Kacheln von ca. 1 km²)."
-                else "${(coverage.exploredMeters / 1000).de(1)} von ${(coverage.totalMeters / 1000).de(1)} Straßenkilometern in den geladenen Kartenkacheln.",
-                color = Fog.Muted, fontSize = 12.sp, lineHeight = 16.sp)
-        }
-        SectionTitle("Aufgedeckt")
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatTile("${c.roadKm.de(1)} km", "Straßen erkundet", painterResource(R.drawable.ic_road), Modifier.weight(1f))
-            StatTile(c.roads.de(), "Straßenabschnitte", painterResource(R.drawable.ic_compass), Modifier.weight(1f))
-        }
-        Spacer(Modifier.height(10.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatTile(c.blocks.de(), "Häuserblöcke", painterResource(R.drawable.ic_blocks), Modifier.weight(1f))
-            StatTile(c.buildings.de(), "Gebäude sichtbar", painterResource(R.drawable.ic_building), Modifier.weight(1f))
-        }
-        if (sync.inGroup) {
-            Spacer(Modifier.height(10.dp))
-            Text("Davon selbst erkundet: ${c.ownRoads.de()} Abschnitte · ${c.ownRoadKm.de(1)} km", color = Fog.Muted, fontSize = 12.sp)
-        }
-        SectionTitle("Unterwegs")
-        val walk = prefs.distance(TravelMode.WALK); val bike = prefs.distance(TravelMode.BIKE); val car = prefs.distance(TravelMode.CAR)
-        val total = walk + bike + car
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatTile("${(total / 1000).de(1)} km", "zurückgelegt", rememberVectorPainter(Icons.Filled.LocationOn), Modifier.weight(1f))
-            StatTile(formatDuration(prefs.trackedSeconds), "Erkundungszeit", painterResource(R.drawable.ic_clock), Modifier.weight(1f))
-        }
-        Spacer(Modifier.height(12.dp))
-        ModeRow(painterResource(R.drawable.ic_walk), "Zu Fuß", walk, total)
-        ModeRow(painterResource(R.drawable.ic_bike), "Fahrrad", bike, total)
-        ModeRow(painterResource(R.drawable.ic_car), "Auto", car, total)
-        if (sync.inGroup && sync.members.isNotEmpty()) {
-            SectionTitle("Gruppe „${sync.groupName}“")
-            sync.members.sortedByDescending { it.km }.forEachIndexed { i, m -> MemberRow(i, m.name, m.km, m.roads, m.isMe, m.live != null) }
-        }
+private fun InfoLine(icon: Painter, label: String, value: String, tint: Color) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(icon, null, tint = tint, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.width(10.dp))
+        Text(label, fontSize = 13.sp, color = Fog.Muted, modifier = Modifier.width(118.dp))
+        Text(value, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
     }
 }
 

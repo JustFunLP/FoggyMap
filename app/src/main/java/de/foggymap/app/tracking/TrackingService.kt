@@ -79,6 +79,8 @@ class TrackingService : Service() {
     // Battery profile state
     private var stillAnchor: LatLon? = null
     private var stillSince = 0L
+    /** Places where you often stand still (learned on the phone, never shared). */
+    private val restSpots by lazy { de.foggymap.app.core.RestSpots.decode(App.prefs.restSpots) }
     private var lastGoodFixAt = 0L
 
     // Statistics, flushed periodically
@@ -93,7 +95,7 @@ class TrackingService : Service() {
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, i: Intent?) {
-            locations.configure(App.prefs.batteryMode, screenOn = i?.action != Intent.ACTION_SCREEN_OFF)
+            locations.configure(screenOn = i?.action != Intent.ACTION_SCREEN_OFF)
         }
     }
 
@@ -106,7 +108,7 @@ class TrackingService : Service() {
         locations.batchingAllowed = !App.prefs.batchingUnreliable
         locations.onSignificantMotion = { scope.launch { wake("Bewegung erkannt") } }
         val pm = getSystemService(PowerManager::class.java)
-        locations.configure(App.prefs.batteryMode, screenOn = pm?.isInteractive ?: true)
+        locations.configure(screenOn = pm?.isInteractive ?: true)
         ContextCompat.registerReceiver(this, screenReceiver,
             IntentFilter().apply { addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_SCREEN_OFF) },
             ContextCompat.RECEIVER_NOT_EXPORTED)
@@ -119,7 +121,6 @@ class TrackingService : Service() {
             return START_NOT_STICKY
         }
         if (intent?.action == ACTION_SETTINGS_CHANGED) {
-            locations.configure(App.prefs.batteryMode)
             scope.launch { explorer?.settings = App.prefs.revealSettings(); radius.reset() }
             if (!App.prefs.shareLiveLocation) App.scope.launch { App.sync.clearLive() }
             return START_STICKY
@@ -341,32 +342,49 @@ class TrackingService : Service() {
 
     // ------------------------------------------------------------------ battery profile
 
+    /**
+     * The GPS rate follows how you move – there are no settings:
+     * moving → full rate, ~30 s standing → throttled, ~2.5 min standing → GPS pause.
+     * At a place where you have often stood before (home, office) the pause comes after ~40 s.
+     */
     private fun updateProfile(fix: Fix, @Suppress("UNUSED_PARAMETER") loc: Location) {
         val now = SystemClock.elapsedRealtime()
         val speed = fix.speed ?: 0.0
         val current = locations.current
         val anchor = stillAnchor
-        if (anchor == null || Geo.distance(anchor, fix.pos) > maxOf(30.0, fix.accuracy) || speed > 1.5) {
+        val moved = anchor?.let { Geo.distance(it, fix.pos) } ?: Double.MAX_VALUE
+        if (moved > maxOf(30.0, fix.accuracy) || speed > 1.5 || (speed > 0.9 && moved > 10.0 && fix.accuracy <= 20.0)) {
             stillAnchor = fix.pos; stillSince = now
-            if (current == LocationController.Profile.STILL) wake("Bewegung")
+            if (current == LocationController.Profile.STILL || current == LocationController.Profile.SLOW) wake("Bewegung")
         }
+        val stillFor = now - stillSince
+        val knownPlace = fix.accuracy <= 50.0 && restSpots.isKnown(stillAnchor ?: fix.pos)
         val target = when {
             current == LocationController.Profile.STILL -> LocationController.Profile.STILL
-            now - stillSince > STILL_AFTER_MS -> LocationController.Profile.STILL
+            stillFor > (if (knownPlace) STILL_AT_KNOWN_PLACE_MS else STILL_AFTER_MS) -> LocationController.Profile.STILL
+            stillFor > SLOW_AFTER_MS -> LocationController.Profile.SLOW
             speed > 7.0 -> LocationController.Profile.FAST
-            speed < 5.0 && current == LocationController.Profile.FAST -> LocationController.Profile.MOVING
-            else -> current ?: LocationController.Profile.MOVING
+            current == LocationController.Profile.FAST && speed >= 5.0 -> LocationController.Profile.FAST
+            else -> LocationController.Profile.MOVING
+        }
+        if (target == LocationController.Profile.STILL && current != LocationController.Profile.STILL) {
+            locations.atKnownPlace = knownPlace
+            if (fix.accuracy <= 50.0) {
+                restSpots.record(stillAnchor ?: fix.pos, System.currentTimeMillis())
+                App.prefs.restSpots = restSpots.encode()
+            }
         }
         if (target != current) setProfile(target)
     }
 
     private fun setProfile(p: LocationController.Profile) {
+        android.util.Log.i("FoggyMap", "gps profile -> $p" + if (p == LocationController.Profile.STILL && locations.atKnownPlace) " (known place)" else "")
         locations.apply(p)
         App.tracking.update { it.copy(powerProfile = p.label) }
     }
 
     private fun wake(@Suppress("UNUSED_PARAMETER") reason: String) {
-        if (locations.current == LocationController.Profile.STILL) {
+        if (locations.current == LocationController.Profile.STILL || locations.current == LocationController.Profile.SLOW) {
             stillSince = SystemClock.elapsedRealtime()
             lastGoodFixAt = SystemClock.elapsedRealtime()
             setProfile(LocationController.Profile.MOVING)
@@ -388,6 +406,7 @@ class TrackingService : Service() {
                 lastGoodFixAt = now
             }
             if (locations.current != LocationController.Profile.STILL && now - lastGoodFixAt > NO_SIGNAL_MS) {
+                locations.atKnownPlace = false
                 setProfile(LocationController.Profile.STILL)
             }
             if (tick % 2 == 0) flushStats()
@@ -526,6 +545,8 @@ class TrackingService : Service() {
         const val MAX_QUEUE = 20_000
         const val TRAIL_POINTS = 900
         const val STILL_AFTER_MS = 150_000L
+        const val STILL_AT_KNOWN_PLACE_MS = 40_000L
+        const val SLOW_AFTER_MS = 30_000L
         const val NO_SIGNAL_MS = 180_000L
 
         fun createChannel(context: Context) {

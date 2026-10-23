@@ -25,6 +25,7 @@ import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.expressions.Expression
 import org.maplibre.android.style.expressions.Expression.color
 import org.maplibre.android.style.expressions.Expression.get
 import org.maplibre.android.style.expressions.Expression.interpolate
@@ -112,7 +113,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         val empty = FogBuilder.EMPTY
         val worldFog = FogBuilder(51.0).fogGeoJson(0.0)
         for (id in listOf(SRC_FOG_A, SRC_FOG_B, SRC_FOG_C)) addSource(id, worldFog, tolerance = 0.2f)
-        for (id in listOf(SRC_EDGE, SRC_ROADS, SRC_BLDG, SRC_BLDG_NEW, SRC_FLASH, SRC_FRIENDS)) addSource(id, empty)
+        for (id in listOf(SRC_EDGE, SRC_BLDG, SRC_BLDG_NEW, SRC_FLASH, SRC_FRIENDS)) addSource(id, empty)
         GeoJsonSource(SRC_TRAIL, GeoJsonOptions().withLineMetrics(true).withTolerance(0.3f)).let { src -> style.addSource(src); src.setGeoJson(empty) }
 
         val below = if (style.getLayer("place-labels") != null) "place-labels" else null
@@ -123,24 +124,21 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         add(FillLayer(L_FOG_B, SRC_FOG_B).withProperties(fillColor(FOG), fillOpacity(0.55f), fillAntialias(true)))
         add(FillLayer(L_FOG_C, SRC_FOG_C).withProperties(fillColor(FOG), fillOpacity(0.78f), fillAntialias(true)))
         add(FillLayer(L_FOG_CLOUDS, SRC_FOG_C).withProperties(fillPattern(IMG_CLOUDS), fillOpacity(0.92f), fillAntialias(false)))
-        // Glowing rim of the explored area.
-        add(LineLayer(L_EDGE_GLOW, SRC_EDGE).withProperties(lineColor(VIOLET), lineOpacity(0.55f), lineBlur(7f),
+        // Streets shimmer faintly through the fog (same warm colour as on the map, much dimmer),
+        // so you can see where streets are without the fog giving away the city.
+        add(LineLayer(L_GHOST, "omt").withSourceLayer("transportation").withProperties(
+            lineColor(ROAD), lineBlur(0.6f), lineOpacity(Expression.raw(GHOST_OPACITY)), lineWidth(Expression.raw(GHOST_WIDTH)),
+            lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)).also { it.setFilter(Expression.raw(GHOST_FILTER)); it.minZoom = 12f })
+        // Soft glow along the fog border.
+        add(LineLayer(L_EDGE_GLOW, SRC_EDGE).withProperties(lineColor(VIOLET), lineOpacity(0.4f), lineBlur(7f),
             lineWidth(interpolate(linear(), zoom(), stop(12, 2f), stop(17, 9f), stop(20, 16f))), lineJoin(Property.LINE_JOIN_ROUND)))
-        add(LineLayer(L_EDGE, SRC_EDGE).withProperties(lineColor(LAVENDER), lineOpacity(0.45f),
-            lineWidth(interpolate(linear(), zoom(), stop(12, 0.6f), stop(18, 1.6f))), lineJoin(Property.LINE_JOIN_ROUND)))
-        // Explored street centre lines (violet light trails as in the design).
-        add(LineLayer(L_ROADS_GLOW, SRC_ROADS).withProperties(lineColor(VIOLET), lineOpacity(0.35f), lineBlur(5f),
-            lineWidth(interpolate(linear(), zoom(), stop(12, 2f), stop(18, 14f))), lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
-        add(LineLayer(L_ROADS, SRC_ROADS).withProperties(lineColor("#C9B8FF"), lineOpacity(0.55f),
-            lineWidth(interpolate(linear(), zoom(), stop(12, 0.5f), stop(18, 2.2f))), lineCap(Property.LINE_CAP_ROUND)))
         // Your own path as a fading light trail – visible immediately, even before the street is matched.
+        // Warm white, so it reads as "light on the street" and not as one more colour.
         val trailFade = interpolate(linear(), lineProgress(),
-            stop(0.0, color(Color.argb(0, 34, 211, 238))), stop(0.55, color(Color.argb(90, 34, 211, 238))),
-            stop(1.0, color(Color.argb(235, 165, 243, 252))))
-        add(LineLayer(L_TRAIL_GLOW, SRC_TRAIL).withProperties(lineGradient(trailFade), lineOpacity(0.55f), lineBlur(6f),
-            lineWidth(interpolate(linear(), zoom(), stop(12, 4f), stop(18, 16f))), lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
-        add(LineLayer(L_TRAIL, SRC_TRAIL).withProperties(lineGradient(trailFade),
-            lineWidth(interpolate(linear(), zoom(), stop(12, 1.2f), stop(18, 3.6f))), lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
+            stop(0.0, color(Color.argb(0, 255, 241, 214))), stop(0.6, color(Color.argb(70, 255, 241, 214))),
+            stop(1.0, color(Color.argb(220, 255, 246, 230))))
+        add(LineLayer(L_TRAIL, SRC_TRAIL).withProperties(lineGradient(trailFade), lineBlur(0.8f),
+            lineWidth(interpolate(linear(), zoom(), stop(12, 1.2f), stop(18, 3.4f))), lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
         // Revealed buildings in 3D as a night city: facades with lit windows, dark flat roofs on top.
         // Every building is at least ~8 m high, so houses without height data still read as 3D.
         style.addImage(IMG_WINDOWS, WindowTexture.create())
@@ -221,7 +219,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
             builder.add(items)
             Rendered(
                 builder.fogGeoJson(0.0), builder.fogGeoJson(9.0), builder.fogGeoJson(24.0), builder.edgeGeoJson(),
-                builder.roadsGeoJson(), builder.buildingsGeoJson(),
+                builder.buildingsGeoJson(),
                 if (initial) null else builder.itemsGeoJson(items),
                 if (initial) null else builder.buildingsGeoJson(items),
             )
@@ -231,7 +229,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         android.util.Log.i(TAG, "fog updated: +${items.size} items (total ${builder.itemCount}) in ${android.os.SystemClock.elapsedRealtime() - t0} ms")
     }
 
-    private class Rendered(val fogA: String, val fogB: String, val fogC: String, val edge: String, val roads: String,
+    private class Rendered(val fogA: String, val fogB: String, val fogC: String, val edge: String,
                            val buildings: String, val newAreas: String?, val newBuildings: String?)
 
     private fun apply(r: Rendered) {
@@ -239,7 +237,6 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         source(SRC_FOG_B)?.setGeoJson(r.fogB)
         source(SRC_FOG_C)?.setGeoJson(r.fogC)
         source(SRC_EDGE)?.setGeoJson(r.edge)
-        source(SRC_ROADS)?.setGeoJson(r.roads)
         if (r.newAreas == null || !animationsEnabled) {
             source(SRC_BLDG)?.setGeoJson(r.buildings)
             return
@@ -285,7 +282,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
             repeatCount = ValueAnimator.INFINITE
             interpolator = LinearInterpolator()
             addUpdateListener { a ->
-                val v = 0.35f + 0.35f * (a.animatedValue as Float)
+                val v = 0.25f + 0.25f * (a.animatedValue as Float)
                 if (kotlin.math.abs(v - lastValue) > 0.025f) { lastValue = v; glow.setProperties(lineOpacity(v)) }
             }
             start()
@@ -313,6 +310,11 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
 
     var follow = Follow.FREE; private set
     private var perspectiveOn = true
+    /** North up instead of your viewing direction (compass button). The arrow still shows where you look. */
+    var northUp = false; private set
+    /** Current map rotation, for the compass button (only reported when it changed by a degree or more). */
+    var onBearingChanged: ((Float) -> Unit)? = null
+    private var reportedBearing = Float.NaN
     private var puckPos: LatLng? = null          // drawn
     private var targetPos: LatLng? = null        // latest fix
     private var puckBearing = 0.0
@@ -341,6 +343,8 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         style.addLayer(SymbolLayer(L_ME, SRC_ME).withProperties(iconImage(IMG_PUCK), iconRotate(get("b")),
             iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP), iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_MAP),
             iconAllowOverlap(true), iconIgnorePlacement(true), iconSize(1.0f)))
+        map.addOnCameraMoveListener { reportBearing() }
+        map.addOnCameraIdleListener { reportBearing() }
         map.addOnCameraMoveStartedListener { reason ->
             if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE && follow == Follow.FOLLOW) gestureActive = true
         }
@@ -353,7 +357,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
             val moved = p != null && map.projection.toScreenLocation(p).let { s ->
                 val f = focalPoint(); kotlin.math.hypot((s.x - f.x).toDouble(), (s.y - f.y).toDouble()) > 48 * context.resources.displayMetrics.density
             }
-            val turned = hasBearing && kotlin.math.abs(angleDelta(map.cameraPosition.bearing, puckBearing)) > 10.0
+            val turned = !northUp && hasBearing && kotlin.math.abs(angleDelta(map.cameraPosition.bearing, puckBearing)) > 10.0
             if (moved || turned) release() else kick()
         }
     }
@@ -410,7 +414,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         setPuck(np, nb)
         if (follow == Follow.FOLLOW && !gestureActive && !entering) {
             val cp = map.cameraPosition
-            val bearing = if (hasBearing) nb else cp.bearing
+            val bearing = if (northUp) 0.0 else if (hasBearing) nb else cp.bearing
             val t = cp.target
             val moved = t == null || kotlin.math.abs(t.latitude - np.latitude) > 2e-7 || kotlin.math.abs(t.longitude - np.longitude) > 2e-7 ||
                 kotlin.math.abs(angleDelta(cp.bearing, bearing)) > 0.05
@@ -441,7 +445,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         val zoom = cp.zoom.let { if (it < 14.5 || it > 19.5) 17.2 else it }
         entering = true
         map.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder().target(target).zoom(zoom)
-            .tilt(if (perspective) 58.0 else 0.0).bearing(if (hasBearing) puckBearing else cp.bearing)
+            .tilt(if (perspective) 58.0 else 0.0).bearing(if (northUp) 0.0 else if (hasBearing) puckBearing else cp.bearing)
             .padding(0.0, topPad(), 0.0, 0.0).build()), 650, object : MapLibreMap.CancelableCallback {
             override fun onFinish() { entering = false; kick() }
             override fun onCancel() { entering = false; kick() }
@@ -457,6 +461,39 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
     }
 
     fun stopFollowing() { follow = Follow.FREE; map.uiSettings.focalPoint = null }
+
+    /**
+     * Compass button: north up (also while the map follows you) or back to your viewing direction.
+     * With north up the map cannot be turned by hand, so it stays that way.
+     */
+    fun setNorthUp(on: Boolean, animate: Boolean = true) {
+        northUp = on
+        map.uiSettings.isRotateGesturesEnabled = !on
+        if (follow == Follow.FOLLOW) {
+            if (!animate) { kick(); return }
+            entering = true
+            val cp = map.cameraPosition
+            map.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(cp)
+                .bearing(if (on) 0.0 else if (hasBearing) puckBearing else cp.bearing).build()), 450, object : MapLibreMap.CancelableCallback {
+                override fun onFinish() { entering = false; kick() }
+                override fun onCancel() { entering = false; kick() }
+            })
+        } else if (on) {
+            val cp = map.cameraPosition
+            if (animate) map.animateCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(cp).bearing(0.0).build()), 450)
+            else map.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder(cp).bearing(0.0).build()))
+        }
+    }
+
+    private fun reportBearing() {
+        val b = map.cameraPosition.bearing.toFloat()
+        if (reportedBearing.isNaN() || kotlin.math.abs(angleDelta(reportedBearing.toDouble(), b.toDouble())) >= 1.0) {
+            reportedBearing = b
+            onBearingChanged?.invoke(b)
+        }
+    }
+
+    val perspective get() = perspectiveOn
 
     private fun topPad() = if (perspectiveOn) context.resources.displayMetrics.heightPixels * 0.35 else 0.0
 
@@ -499,18 +536,27 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         const val VIOLET = "#8B5CF6"
         const val LAVENDER = "#C4B5FD"
         const val CYAN = "#22D3EE"
+        /** The one street colour (same as the base map's roads in style.json). */
+        const val ROAD = "#e9a552"
+        const val L_GHOST = "ghost-roads"
+        private const val CLS = "[\"get\",\"class\"]"
+        private const val CAR = "\"motorway\",\"trunk\",\"primary\",\"secondary\",\"tertiary\",\"minor\",\"service\",\"unclassified\",\"residential\",\"living_street\",\"busway\""
+        private const val FOOT = "\"path\",\"track\",\"pedestrian\""
+        const val GHOST_FILTER = "[\"all\",[\"match\",$CLS,[$CAR,$FOOT],true,false],[\"!=\",[\"get\",\"brunnel\"],\"tunnel\"]]"
+        const val GHOST_OPACITY = "[\"match\",$CLS,[\"motorway\",\"trunk\",\"primary\"],0.42,[\"secondary\",\"tertiary\"],0.34,[$FOOT],0.14,0.26]"
+        private const val GHOST_FACTOR = "[\"match\",$CLS,[\"motorway\",\"trunk\",\"primary\"],1.6,[\"secondary\",\"tertiary\"],1.3,[$FOOT],0.45,1.0]"
+        const val GHOST_WIDTH = "[\"interpolate\",[\"exponential\",1.4],[\"zoom\"],12,[\"*\",0.5,$GHOST_FACTOR],18,[\"*\",5,$GHOST_FACTOR]]"
         const val IMG_CLOUDS = "fog-clouds"
         const val SRC_FOG_A = "fog-a"; const val SRC_FOG_B = "fog-b"; const val SRC_FOG_C = "fog-c"
-        const val SRC_EDGE = "fog-edge"; const val SRC_ROADS = "explored"; const val SRC_BLDG = "bldg"
+        const val SRC_EDGE = "fog-edge"; const val SRC_BLDG = "bldg"
         const val SRC_BLDG_NEW = "bldg-new"; const val SRC_FLASH = "reveal-flash"; const val SRC_FRIENDS = "friends"
         const val L_FOG_A = "fog-a"; const val L_FOG_B = "fog-b"; const val L_FOG_C = "fog-c"; const val L_FOG_CLOUDS = "fog-clouds"
-        const val L_EDGE_GLOW = "fog-edge-glow"; const val L_EDGE = "fog-edge"; const val L_ROADS_GLOW = "explored-glow"
-        const val L_ROADS = "explored"; const val L_BLDG = "bldg-3d"; const val L_BLDG_NEW = "bldg-3d-new"
+        const val L_EDGE_GLOW = "fog-edge-glow"; const val L_BLDG = "bldg-3d"; const val L_BLDG_NEW = "bldg-3d-new"
         const val L_DISSOLVE = "reveal-dissolve"; const val L_DISSOLVE_CLOUDS = "reveal-dissolve-clouds"; const val L_FLASH = "reveal-flash"
         const val L_FRIENDS = "friends"; const val L_FRIENDS_LABEL = "friends-label"
         const val IMG_WINDOWS = "windows"; const val ROOF = "#1a1c38"
         const val L_BLDG_ROOF = "bldg-roof"; const val L_BLDG_NEW_ROOF = "bldg-new-roof"
-        const val SRC_TRAIL = "trail"; const val L_TRAIL = "trail"; const val L_TRAIL_GLOW = "trail-glow"
+        const val SRC_TRAIL = "trail"; const val L_TRAIL = "trail"
         const val IMG_PUCK = "me-arrow"; const val SRC_ME = "me"; const val L_ME = "me-arrow"; const val L_ME_GLOW = "me-glow"
     }
 }

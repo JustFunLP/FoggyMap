@@ -44,7 +44,7 @@ scripts/       Emulator-End-to-End-Test (simulierte GPS-Route)
 4. **GPS-Zuordnung:** Positionen ungenauer als ±35 m und Sprünge über 250 km/h werden verworfen. Gesucht wird in einem Radius, der von der Genauigkeit abhängt. Die Bewertung berücksichtigt den Abstand, die Bewegungsrichtung gegenüber der Straßenachse und die Fortsetzung des bisherigen Abschnitts.
    Ist ein anderer Abschnitt fast gleich gut (Parallelstraße, Kreuzung), zählt nichts. Ein Abschnitt braucht mindestens zwei Belege, und in der Kreuzungszone zählt nur eindeutige Bewegung entlang der Straße.
    Im Stand wird über die letzten 20 s gemittelt, damit GPS-Zittern an einer Kreuzung keine Seitenstraßen freischaltet. Schnelle Fahrten werden zwischen zwei Positionen interpoliert, damit auch 30 m kurze Abschnitte erkannt werden.
-5. **Offline / Sofortanzeige:** Dein Weg erscheint sofort als Leuchtspur, auch bevor die Straße zugeordnet ist. Positionen ohne geladene Kartendaten landen in einer gespeicherten Warteschlange und werden in zeitlicher Reihenfolge nachträglich ausgewertet. Mit der alten Datenquelle aufgedeckte Straßen werden geometrisch wiedererkannt und nicht doppelt gezählt.
+5. **Offline / Sofortanzeige:** Dein Weg erscheint sofort als heller Lichtstreifen, auch bevor die Straße zugeordnet ist. Positionen ohne geladene Kartendaten landen in einer gespeicherten Warteschlange und werden in zeitlicher Reihenfolge nachträglich ausgewertet. Mit der alten Datenquelle aufgedeckte Straßen werden geometrisch wiedererkannt und nicht doppelt gezählt.
 
 ## Koop-Synchronisierung
 
@@ -62,14 +62,16 @@ scripts/       Emulator-End-to-End-Test (simulierte GPS-Route)
 
 | Maßnahme | Wirkung |
 |---|---|
+| Nach ~30 s Stillstand nur noch alle 10 s eine Position | spart bei kurzen Halten (Ampel, Schaufenster) |
 | GPS aus nach ~2,5 min Stillstand. Aufwecken über den Bewegungssensor, passive Positionen und kurze GPS-Stichproben alle 45 s | größter Effekt beim Stehen und Sitzen |
+| **Bewegungsprofil:** Orte, an denen du schon zweimal stillgestanden hast (Zuhause, Büro), merkt sich das Handy (nur lokal). Dort pausiert das GPS schon nach ~40 s, Stichproben alle 90 s | weniger GPS an den Orten, an denen du am meisten Zeit verbringst |
 | Kein GPS-Empfang seit 3 min (drinnen) → Pause | verhindert stundenlange Satellitensuche |
-| Update-Rate je nach Tempo (zu Fuß 3 s / 4 m, Auto 2 s / 10 m) | weniger Aufwachvorgänge |
+| Update-Rate je nach Tempo (zu Fuß alle 3 s, Auto alle 2 s) | genug Punkte auch für kurze Abschnitte |
 | Bildschirm aus → gebündelte Lieferung durch den GPS-Chip (Android 12+) | Hauptprozessor wacht nur alle 15–30 s auf |
 | Kartendaten einmalig pro Kachel, Sync gebündelt, keine Wakelocks | weniger Funk und CPU |
 | Karte animiert nur im Vordergrund. Kein dauerhaft pulsierender Positionspunkt | weniger GPU |
 
-Drei Profile in den Einstellungen: *Präzise*, *Ausgewogen* (Standard) und *Sparsam*.
+Es gibt keine Akku- oder GPS-Einstellungen: Alles oben passiert automatisch. Was das GPS gerade tut, steht unter Menü → Info.
 
 ## Build
 

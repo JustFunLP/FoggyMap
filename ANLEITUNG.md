@@ -20,19 +20,24 @@ Alles hier geht im Browser bzw. der GitHub-App auf dem Android-Handy. Ein PC ist
    - Standort: **„Während der Nutzung der App“** und **„Genau“** wählen.
    - Benachrichtigungen: **Zulassen** (zeigt, dass aufgezeichnet wird).
 3. Losgehen, -radeln oder -fahren. Sobald du eine Straße betrittst, verschwindet der Nebel über dem ganzen Abschnitt bis zur nächsten Kreuzung und über den angrenzenden Häuserblöcken.
-4. Das Handy darf in die Tasche, der Bildschirm darf aus sein. Beenden über **„Erkundung beenden“** oder in der Benachrichtigung.
-5. **Standort-Knopf** (unten rechts über der Karte): Ein Tipp fixiert die Karte auf dich und dreht deine Blickrichtung nach oben (beim Rad- und Autofahren die Fahrtrichtung). Verschiebst du die Karte mit dem Finger, löst sich das. Zoomen geht, ohne dass es sich löst.
-6. **Menü** (oben rechts) mit drei Reitern:
-   - **Erkunden:** Was wird aufgedeckt? *Häuserblöcke* (Stadt), *Straßenzug* (Streifen links und rechts, Breite einstellbar, ideal im Dorf) oder *Umkreis* (Radius um deinen Weg, sofort, auch ohne Kartendaten). Dazu Akku & GPS, 3D-Ansicht und Offline-Karte.
+4. Das Handy darf in die Tasche, der Bildschirm darf aus sein. Beenden über **„Beenden“** unten auf der Karte oder in der Benachrichtigung.
+5. **Drei Knöpfe rechts unten auf der Karte:**
+   - **Kompass:** Die Nadel zeigt immer nach Norden. Ein Tipp dreht die Karte nach Norden und hält sie so, auch wenn sie auf dich fixiert ist (der Knopf leuchtet dann). Noch ein Tipp: wieder deine Blickrichtung oben.
+   - **2D / 3D:** wechselt zwischen flacher Karte und geneigter 3D-Ansicht.
+   - **Standort:** fixiert die Karte auf dich, deine Blickrichtung oben (beim Rad- und Autofahren die Fahrtrichtung). Verschiebst du die Karte mit dem Finger, löst sich das. Zoomen geht, ohne dass es sich löst.
+6. **Menü** (oben rechts) mit vier Reitern:
+   - **Info:** wie viel du erkundet hast, diese Tour, was das GPS gerade macht, alle Statistiken.
+   - **Erkunden:** Was wird aufgedeckt? *Häuserblöcke* (Stadt), *Straßenzug* (Streifen links und rechts, Breite einstellbar, ideal im Dorf) oder *Umkreis* (Radius um deinen Weg, sofort, auch ohne Kartendaten). Dazu 3D-Gebäude, Animationen und Offline-Karte.
    - **Koop:** Gruppe erstellen oder beitreten, Mitglieder, Live-Standort.
    - **App:** Updates, Berechtigungen, Daten löschen.
 
 **Tipps**
-- Dein Weg erscheint sofort als Leuchtspur. Die Straßendaten kommen nach ein, zwei Sekunden, dann löst sich der Nebel über der Straße auf.
+- Dein Weg erscheint sofort als heller Lichtstreifen. Die Straßendaten kommen nach ein, zwei Sekunden, dann löst sich der Nebel über der Straße auf.
+- Unter dem Nebel schimmern die Straßen schwach durch, damit du siehst, wo es noch etwas zu entdecken gibt.
 - Beim Erkunden lädt die App die Umgebung im Hintergrund (im WLAN die ganze Stadt, ca. 8 km). Wer vorab alles will: Menü → Erkunden → **Ganze Stadt herunterladen**. Danach geht alles ohne Netz.
 - Ohne Internet läuft die Aufzeichnung weiter. Die Wege werden gespeichert und aufgedeckt, sobald die Kartendaten geladen werden können.
 - Samsung/Xiaomi/Huawei: Falls die Aufzeichnung im Hintergrund stoppt, Menü → App → *Akku-Optimierung* auf „Nicht eingeschränkt“ stellen.
-- Akku: Menü → Erkunden → *Akku & GPS* → „Ausgewogen“ (Standard) oder „Sparsam“.
+- Akku: Es gibt keine GPS-Einstellungen. In Bewegung misst FoggyMap alle 2–3 Sekunden. Stehst du etwa 30 Sekunden, wird gedrosselt, nach 2,5 Minuten pausiert das GPS. An Orten, an denen du schon öfter gestanden hast (z. B. Zuhause, Büro), pausiert es schon nach 40 Sekunden. Sobald du weitergehst, ist es sofort wieder voll da. Diese Orte merkt sich nur dein Handy, sie werden nie geteilt.
 
 ---
 

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -68,16 +69,15 @@ import de.foggymap.app.R
 import de.foggymap.app.core.Invite
 import de.foggymap.app.core.LatLon
 import de.foggymap.app.core.RevealMode
-import de.foggymap.app.data.BatteryMode
 import de.foggymap.app.data.SyncUi
 import de.foggymap.app.data.TileRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class MenuTab(val label: String) { EXPLORE("Erkunden"), COOP("Koop"), APP("App") }
+enum class MenuTab(val label: String) { INFO("Info"), EXPLORE("Erkunden"), COOP("Koop"), APP("App") }
 
-/** One place for everything: how exploring works, the group, and the app itself. */
+/** One place for everything: progress and GPS state, how exploring works, the group, and the app itself. */
 @Composable
 fun MenuSheet(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> Unit, initialTab: MenuTab,
               onChanged: () -> Unit, onDataCleared: () -> Unit, onDismiss: () -> Unit) {
@@ -99,6 +99,7 @@ internal fun MenuContent(sync: SyncUi, pendingInvite: String?, onInviteUsed: () 
         TabBar(tab, sync) { tab = it }
         Spacer(Modifier.height(6.dp))
         when (tab) {
+            MenuTab.INFO -> InfoTab(sync)
             MenuTab.EXPLORE -> ExploreTab(onChanged)
             MenuTab.COOP -> CoopTab(sync, pendingInvite, onInviteUsed)
             MenuTab.APP -> AppTab(onDataCleared)
@@ -113,23 +114,26 @@ private fun TabBar(selected: MenuTab, sync: SyncUi, onSelect: (MenuTab) -> Unit)
         for (t in MenuTab.entries) {
             val active = t == selected
             val icon = when (t) {
+                MenuTab.INFO -> rememberVectorPainter(Icons.Filled.Info)
                 MenuTab.EXPLORE -> painterResource(R.drawable.ic_compass)
                 MenuTab.COOP -> painterResource(R.drawable.ic_group)
                 MenuTab.APP -> rememberVectorPainter(Icons.Filled.Settings)
             }
-            Row(Modifier.weight(1f).height(44.dp).clip(RoundedCornerShape(14.dp))
+            // Icon above the label: four tabs fit on any phone width.
+            Column(Modifier.weight(1f).height(58.dp).clip(RoundedCornerShape(14.dp))
                 .then(if (active) Modifier.background(Fog.button) else Modifier)
-                .clickable { onSelect(t) }, horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                Icon(icon, null, tint = if (active) Color.White else Fog.Lavender, modifier = Modifier.size(18.dp))
-                Spacer(Modifier.width(7.dp))
-                Text(t.label, color = if (active) Color.White else Fog.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                if (t == MenuTab.COOP && sync.inGroup) {
-                    Spacer(Modifier.width(6.dp))
-                    Box(Modifier.size(18.dp).clip(CircleShape).background(if (active) Color.White.copy(alpha = 0.25f) else Fog.Violet),
-                        contentAlignment = Alignment.Center) {
-                        Text("${maxOf(sync.members.size, 1)}", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                .clickable { onSelect(t) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, null, tint = if (active) Color.White else Fog.Lavender, modifier = Modifier.size(20.dp))
+                    if (t == MenuTab.COOP && sync.inGroup) {
+                        Box(Modifier.offset(x = 14.dp, y = (-7).dp).size(15.dp).clip(CircleShape)
+                            .background(if (active) Color.White.copy(alpha = 0.3f) else Fog.Violet), contentAlignment = Alignment.Center) {
+                            Text("${maxOf(sync.members.size, 1)}", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
+                Spacer(Modifier.height(3.dp))
+                Text(t.label, color = if (active) Color.White else Fog.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
             }
         }
     }
@@ -143,10 +147,8 @@ private fun ExploreTab(onChanged: () -> Unit) {
     var mode by remember { mutableStateOf(prefs.revealMode) }
     var width by remember { mutableFloatStateOf(prefs.stripWidth.toFloat()) }
     var radius by remember { mutableFloatStateOf(prefs.revealRadius.toFloat()) }
-    var battery by remember { mutableIntStateOf(prefs.batteryMode.ordinal) }
     var b3d by remember { mutableStateOf(prefs.buildings3d) }
     var anim by remember { mutableStateOf(prefs.fogAnimation) }
-    var tilt by remember { mutableStateOf(prefs.perspective) }
 
     SectionTitle("Was wird aufgedeckt?")
     ModeCard(RevealMode.BLOCKS, mode, "Häuserblöcke", "Die Straße bis zur nächsten Kreuzung und die Blöcke links und rechts davon. Ideal in der Stadt.") {
@@ -171,16 +173,8 @@ private fun ExploreTab(onChanged: () -> Unit) {
     Text("Gilt ab sofort für neue Wege. Bereits Aufgedecktes bleibt sichtbar. Auf jeder Straßenseite ohne Häuserblock (See, Feld, Ortsrand) wird ein Streifen sichtbar.",
         color = Fog.Muted, fontSize = 11.sp, lineHeight = 15.sp)
 
-    SectionTitle("Akku & GPS")
-    Segmented(BatteryMode.entries.map { it.label }, battery) {
-        battery = it; prefs.batteryMode = BatteryMode.entries[it]; onChanged()
-    }
-    Spacer(Modifier.height(8.dp))
-    Text(BatteryMode.entries[battery].description, color = Fog.Muted, fontSize = 12.sp, lineHeight = 16.sp)
-
     SectionTitle("Ansicht")
     SettingsCard {
-        SwitchRow("3D-Perspektive", "Karte geneigt, du siehst nach vorn", tilt) { tilt = it; prefs.perspective = it; onChanged() }
         SwitchRow("3D-Gebäude", "Häuser mit beleuchteten Fenstern", b3d) { b3d = it; prefs.buildings3d = it; onChanged() }
         SwitchRow("Animationen", "Nebel löst sich auf, Häuser wachsen", anim) { anim = it; prefs.fogAnimation = it; onChanged() }
     }
@@ -390,7 +384,7 @@ private fun AppTab(onDataCleared: () -> Unit) {
     if (confirmReset) AlertDialog(
         onDismissRequest = { confirmReset = false }, containerColor = Fog.Surface, titleContentColor = Fog.Text, textContentColor = Fog.Text,
         title = { Text("Wirklich alles löschen?") },
-        text = { Text("Alle aufgedeckten Gebiete und Statistiken auf diesem Handy werden gelöscht. Daten in einer Koop-Gruppe bleiben auf dem Server und kommen bei der nächsten Synchronisierung zurück.") },
+        text = { Text("Alle aufgedeckten Gebiete, Statistiken und gemerkten Orte auf diesem Handy werden gelöscht. Was du mit einer Koop-Gruppe geteilt hast, kommt bei der nächsten Synchronisierung zurück.") },
         confirmButton = { TextButton(onClick = {
             confirmReset = false
             scope.launch {

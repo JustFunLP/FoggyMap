@@ -4,12 +4,6 @@ import android.content.Context
 import de.foggymap.app.core.TravelMode
 import java.security.SecureRandom
 
-enum class BatteryMode(val label: String, val description: String) {
-    PRECISE("Präzise", "Häufige GPS-Updates – am genauesten, höchster Verbrauch"),
-    BALANCED("Ausgewogen", "Passt die GPS-Rate an dein Tempo an, pausiert GPS im Stillstand"),
-    SAVER("Sparsam", "Positionen werden gesammelt und gebündelt geliefert, längere GPS-Pausen im Stillstand – ideal für lange Touren");
-}
-
 class Prefs(context: Context) {
     private val p = context.getSharedPreferences("foggymap", Context.MODE_PRIVATE)
 
@@ -22,9 +16,15 @@ class Prefs(context: Context) {
         get() = p.getBoolean("tracking_wanted", false)
         set(v) = p.edit().putBoolean("tracking_wanted", v).apply()
 
-    var batteryMode: BatteryMode
-        get() = runCatching { BatteryMode.valueOf(p.getString("battery_mode", null) ?: "") }.getOrDefault(BatteryMode.BALANCED)
-        set(v) = p.edit().putString("battery_mode", v.name).apply()
+    /** Places where you often stand still (see RestSpots); only on this phone. */
+    var restSpots: String
+        get() = p.getString("rest_spots", "") ?: ""
+        set(v) = p.edit().putString("rest_spots", v).apply()
+
+    /** Map with north up instead of your viewing direction (compass button). */
+    var northUp: Boolean
+        get() = p.getBoolean("north_up", false)
+        set(v) = p.edit().putBoolean("north_up", v).apply()
 
     var buildings3d: Boolean
         get() = p.getBoolean("buildings_3d", true)
@@ -169,7 +169,7 @@ class Prefs(context: Context) {
     fun resetStatistics() {
         val e = p.edit()
         TravelMode.entries.forEach { e.remove("dist_${it.name}") }
-        e.remove("tracked_seconds").remove("sync_revision").apply()
+        e.remove("tracked_seconds").remove("sync_revision").remove("rest_spots").remove("battery_mode").apply()
     }
 
     companion object {

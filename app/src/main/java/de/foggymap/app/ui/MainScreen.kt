@@ -52,6 +52,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -59,6 +60,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.rememberVectorPainter
@@ -82,7 +86,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class Sheet { NONE, STATS, MENU }
+enum class Sheet { NONE, MENU }
 
 @Composable
 fun FoggyRoot(activity: MainActivity) {
@@ -96,11 +100,9 @@ fun FoggyRoot(activity: MainActivity) {
 fun MainScreen(activity: MainActivity) {
     val context = LocalContext.current
     val tracking by App.tracking.collectAsState()
-    val coverage by App.coverage.collectAsState()
     val syncUi by App.sync.state.collectAsState()
     val dbVersion by App.dbVersion.collectAsState()
     val location by App.location.collectAsState()
-    val counts by produceState<RevealDatabase.Counts?>(null, dbVersion) { value = withContext(Dispatchers.IO) { App.db.counts() } }
 
     var controller by remember { mutableStateOf<FogMapController?>(null) }
     /** Map fixed on you with your viewing direction up (the location button). */
@@ -108,8 +110,12 @@ fun MainScreen(activity: MainActivity) {
     /** The user moved the map away by hand – do not grab it back automatically. */
     var releasedByUser by remember { mutableStateOf(false) }
     val perspective = App.prefs.perspective
+    /** 2D/3D and north-up are buttons on the map now (no detour through the menu). */
+    var tilted by remember { mutableStateOf(App.prefs.perspective) }
+    var northUp by remember { mutableStateOf(App.prefs.northUp) }
+    var mapBearing by remember { mutableFloatStateOf(0f) }
     var sheet by remember { mutableStateOf(if (activity.pendingInvite != null) Sheet.MENU else Sheet.NONE) }
-    var menuTab by remember { mutableStateOf(if (activity.pendingInvite != null) MenuTab.COOP else MenuTab.EXPLORE) }
+    var menuTab by remember { mutableStateOf(if (activity.pendingInvite != null) MenuTab.COOP else MenuTab.INFO) }
     // An invitation shared into the app opens the Koop tab.
     LaunchedEffect(activity.pendingInvite) { if (activity.pendingInvite != null) { menuTab = MenuTab.COOP; sheet = Sheet.MENU } }
     var permissionProblem by remember { mutableStateOf<String?>(null) }
@@ -153,6 +159,8 @@ fun MainScreen(activity: MainActivity) {
         val c = controller ?: return@LaunchedEffect
         c.animationsEnabled = App.prefs.fogAnimation
         c.onTrackingDismissed = { following = false; releasedByUser = true }
+        c.onBearingChanged = { mapBearing = it }
+        c.setNorthUp(App.prefs.northUp, animate = false)
         if (MainActivity.hasFineLocation(context)) locationEnabled = c.enableLocation()
         val last = App.location.value ?: if (MainActivity.hasFineLocation(context)) lastKnown(context) else null
         last?.let { App.location.value = it }
@@ -228,45 +236,34 @@ fun MainScreen(activity: MainActivity) {
     Box(Modifier.fillMaxSize().background(Fog.Bg)) {
         FogMapView(Modifier.fillMaxSize(), topInset) { controller = it }
 
-        // Top scrim + bar
-        Box(Modifier.fillMaxWidth().height(150.dp).background(Brush.verticalGradient(listOf(Fog.Bg.copy(alpha = 0.92f), Color.Transparent))))
-        Column(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(painterResource(R.drawable.ic_logo), null, tint = Color.Unspecified, modifier = Modifier.size(30.dp))
-                Spacer(Modifier.width(8.dp))
-                LogoTitle(22)
-                Spacer(Modifier.weight(1f))
-                MenuButton(if (syncUi.inGroup) maxOf(syncUi.members.size, 1) else 0) { menuTab = MenuTab.EXPLORE; sheet = Sheet.MENU }
-            }
-            AnimatedVisibility(tracking.active || tracking.message != null, enter = fadeIn() + slideInVertically(), exit = fadeOut() + slideOutVertically()) {
-                StatusChips(tracking)
-            }
-            RevealBanner(tracking)
-        }
-
-        // Bottom: the location button sits right above the card.
-        Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(horizontal = 14.dp, vertical = 10.dp)) {
-            Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), horizontalArrangement = Arrangement.End) {
-                LocateButton(following) {
-                    releasedByUser = false
-                    if (!MainActivity.hasFineLocation(context)) {
-                        locationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
-                        return@LocateButton
-                    }
+        MapControls(tracking, if (syncUi.inGroup) maxOf(syncUi.members.size, 1) else 0, mapBearing, northUp, tilted, following,
+            onMenu = { menuTab = MenuTab.INFO; sheet = Sheet.MENU },
+            onCompass = {
+                northUp = !northUp
+                App.prefs.northUp = northUp
+                controller?.setNorthUp(northUp)
+            },
+            onPerspective = {
+                tilted = !tilted
+                App.prefs.perspective = tilted
+                controller?.setPerspective(tilted)
+            },
+            onLocate = {
+                releasedByUser = false
+                if (!MainActivity.hasFineLocation(context)) {
+                    locationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                } else {
                     following = true
                     controller?.startFollowing(App.prefs.perspective)
                 }
-            }
-            BottomCard(coverage?.percent, counts, tracking, onExpand = { sheet = Sheet.STATS }, onStart = { onStartClicked() })
-        }
+            },
+            onStartStop = { onStartClicked() })
     }
 
     when (sheet) {
-        Sheet.STATS -> StatsSheet(counts, coverage, syncUi) { sheet = Sheet.NONE }
         Sheet.MENU -> MenuSheet(syncUi, activity.pendingInvite, onInviteUsed = { activity.pendingInvite = null }, initialTab = menuTab,
             onChanged = {
                 controller?.setBuildingsVisible(App.prefs.buildings3d)
-                controller?.setPerspective(App.prefs.perspective)
                 controller?.animationsEnabled = App.prefs.fogAnimation
                 if (!App.prefs.fogAnimation) controller?.stopAmbient() else controller?.startAmbient()
                 TrackingService.settingsChanged(context)
@@ -295,7 +292,45 @@ fun MainScreen(activity: MainActivity) {
     }
 }
 
-/** Opens the one menu (Erkunden · Koop · App). Shows the group size when you are in a group. */
+/**
+ * Everything on top of the map. Kept small on purpose: menu, start/stop and three map buttons
+ * (compass = north up, 2D/3D, follow me). Statistics and GPS details live in Menü → Info.
+ */
+@Composable
+internal fun MapControls(tracking: de.foggymap.app.TrackingUi, groupSize: Int, mapBearing: Float, northUp: Boolean, tilted: Boolean,
+                         following: Boolean, onMenu: () -> Unit, onCompass: () -> Unit, onPerspective: () -> Unit,
+                         onLocate: () -> Unit, onStartStop: () -> Unit) {
+    Box(Modifier.fillMaxSize()) {
+        // Top scrim + bar
+        Box(Modifier.fillMaxWidth().height(130.dp).background(Brush.verticalGradient(listOf(Fog.Bg.copy(alpha = 0.92f), Color.Transparent))))
+        Column(Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(painterResource(R.drawable.ic_logo), null, tint = Color.Unspecified, modifier = Modifier.size(30.dp))
+                Spacer(Modifier.width(8.dp))
+                LogoTitle(22)
+                Spacer(Modifier.weight(1f))
+                MenuButton(groupSize, onMenu)
+            }
+            // Only warnings stay on the map (no GPS signal, permission missing …).
+            AnimatedVisibility(tracking.message != null, enter = fadeIn() + slideInVertically(), exit = fadeOut() + slideOutVertically()) {
+                WarningChip(tracking.message ?: "")
+            }
+            RevealBanner(tracking)
+        }
+
+        // Bottom: start/stop in the middle, map buttons on the right.
+        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Column(Modifier.align(Alignment.BottomEnd), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                CompassButton(mapBearing, northUp, onCompass)
+                PerspectiveButton(tilted, onPerspective)
+                LocateButton(following, onLocate)
+            }
+            StartStopButton(tracking.active, Modifier.align(Alignment.BottomCenter), onStartStop)
+        }
+    }
+}
+
+/** Opens the one menu (Info · Erkunden · Koop · App). Shows the group size when you are in a group. */
 @Composable
 internal fun MenuButton(groupSize: Int, onClick: () -> Unit) {
     Row(Modifier.height(44.dp).clip(RoundedCornerShape(22.dp)).background(Fog.Surface.copy(alpha = 0.9f))
@@ -329,63 +364,65 @@ internal fun LocateButton(active: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun TopChip(painter: androidx.compose.ui.graphics.painter.Painter, text: String, active: Boolean, onClick: () -> Unit) {
-    Row(Modifier.height(42.dp).clip(RoundedCornerShape(21.dp))
-        .background(if (active) Fog.Violet.copy(alpha = 0.85f) else Fog.Surface.copy(alpha = 0.85f))
-        .clickable(onClick = onClick).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(painter, null, tint = if (active) Color.White else Fog.Lavender, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(6.dp))
-        Text(text, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+private fun MapButton(active: Boolean, description: String, size: Int = 46, onClick: () -> Unit, content: @Composable () -> Unit) {
+    Box(Modifier.size(size.dp).clip(CircleShape)
+        .background(if (active) Fog.button else Brush.linearGradient(listOf(Fog.Surface.copy(alpha = 0.92f), Fog.Surface.copy(alpha = 0.92f))))
+        .border(1.dp, if (active) Color.White.copy(alpha = 0.25f) else Fog.Line, CircleShape)
+        .semantics { contentDescription = description }
+        .clickable(onClick = onClick), contentAlignment = Alignment.Center) { content() }
+}
+
+/**
+ * Small compass: the needle always points to north on the map. Tap = north up (also while the map
+ * follows you); tap again = your viewing direction up. Highlighted while north is locked.
+ */
+@Composable
+internal fun CompassButton(mapBearing: Float, northUp: Boolean, onClick: () -> Unit) {
+    MapButton(northUp, if (northUp) "Norden oben – tippen für Blickrichtung oben" else "Karte nach Norden ausrichten", onClick = onClick) {
+        val north = if (northUp) Color.White else Color(0xFFFF6B6B)
+        val south = if (northUp) Color.White.copy(alpha = 0.45f) else Fog.Muted
+        androidx.compose.foundation.Canvas(Modifier.size(26.dp).graphicsLayer { rotationZ = -mapBearing }) {
+            val cx = size.width / 2; val cy = size.height / 2; val w = size.width * 0.2f; val h = size.height * 0.46f
+            drawPath(androidx.compose.ui.graphics.Path().apply { moveTo(cx, cy - h); lineTo(cx + w, cy); lineTo(cx - w, cy); close() }, north)
+            drawPath(androidx.compose.ui.graphics.Path().apply { moveTo(cx, cy + h); lineTo(cx + w, cy); lineTo(cx - w, cy); close() }, south)
+            drawCircle(Fog.Bg, radius = w * 0.45f, center = androidx.compose.ui.geometry.Offset(cx, cy))
+        }
     }
 }
 
+/** Switches between the tilted 3D view and the flat 2D map. Shows what a tap switches to. */
 @Composable
-private fun Chip(content: @Composable androidx.compose.foundation.layout.RowScope.() -> Unit) {
-    Row(Modifier.height(32.dp).clip(RoundedCornerShape(16.dp)).background(Fog.Surface.copy(alpha = 0.88f))
-        .border(1.dp, Fog.Line, RoundedCornerShape(16.dp)).padding(horizontal = 11.dp),
-        verticalAlignment = Alignment.CenterVertically, content = content)
+internal fun PerspectiveButton(tilted: Boolean, onClick: () -> Unit) {
+    MapButton(false, if (tilted) "Zur 2D-Ansicht wechseln" else "Zur 3D-Ansicht wechseln", onClick = onClick) {
+        Text(if (tilted) "2D" else "3D", color = Fog.Lavender, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+    }
 }
 
-/** Compact status line: GPS quality · travel mode · GPS pause · loading. */
+/** Start exploring (big button) – while it runs only a small "Beenden" pill with a recording dot. */
 @Composable
-internal fun StatusChips(t: de.foggymap.app.TrackingUi) {
-    val acc = t.accuracy
-    val dot = when {
-        !t.active -> Fog.Muted
-        acc == null -> Fog.Amber
-        acc <= 15f -> Fog.Success
-        acc <= 35f -> Fog.Amber
-        else -> Fog.Danger
-    }
-    Column(Modifier.padding(top = 8.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (t.active) Chip {
-                Box(Modifier.size(8.dp).clip(CircleShape).background(dot))
-                Spacer(Modifier.width(7.dp))
-                Text(if (acc == null) "GPS …" else "±${acc.toInt()} m", color = Fog.Text, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            }
-            if (t.active && acc != null) Chip {
-                Icon(painterResource(modeIcon(t.mode)), null, tint = Fog.Lavender, modifier = Modifier.size(15.dp))
-                Spacer(Modifier.width(5.dp))
-                Text(modeLabel(t.mode), color = Fog.Text, fontSize = 12.sp)
-            }
-            if (t.active && t.powerProfile.startsWith("GPS-Pause")) Chip {
-                Icon(painterResource(R.drawable.ic_battery), null, tint = Fog.Success, modifier = Modifier.size(14.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Pause", color = Fog.Text, fontSize = 12.sp)
-            }
-            if (t.loadingMap) Chip {
-                androidx.compose.material3.CircularProgressIndicator(Modifier.size(12.dp), color = Fog.Cyan, strokeWidth = 1.6.dp)
-                Spacer(Modifier.width(6.dp))
-                Text("lade Straßen", color = Fog.Text, fontSize = 12.sp)
-            }
-        }
-        t.message?.let {
-            Spacer(Modifier.height(6.dp))
-            Text(it, color = Fog.Amber, fontSize = 12.sp, modifier = Modifier.clip(RoundedCornerShape(12.dp))
-                .background(Fog.Surface.copy(alpha = 0.9f)).padding(horizontal = 12.dp, vertical = 6.dp))
+internal fun StartStopButton(active: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    if (!active) {
+        PrimaryButton("Erkundung starten", modifier.width(230.dp), icon = rememberVectorPainter(Icons.Filled.PlayArrow), onClick = onClick)
+    } else {
+        Row(modifier.height(46.dp).clip(RoundedCornerShape(23.dp)).background(Fog.Surface.copy(alpha = 0.92f))
+            .border(1.dp, Fog.Line, RoundedCornerShape(23.dp)).clickable(onClick = onClick).padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            val pulse by androidx.compose.animation.core.rememberInfiniteTransition(label = "rec").animateFloat(0.35f, 1f,
+                androidx.compose.animation.core.infiniteRepeatable(tween(1100), androidx.compose.animation.core.RepeatMode.Reverse), label = "dot")
+            Box(Modifier.size(9.dp).clip(CircleShape).background(Fog.Success.copy(alpha = pulse)))
+            Spacer(Modifier.width(10.dp))
+            Icon(painterResource(R.drawable.ic_stop), null, tint = Fog.Danger, modifier = Modifier.size(15.dp))
+            Spacer(Modifier.width(7.dp))
+            Text("Beenden", color = Fog.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
     }
+}
+
+/** A problem worth seeing on the map (no permission, no signal …). */
+@Composable
+internal fun WarningChip(text: String) {
+    Text(text, color = Fog.Amber, fontSize = 12.sp, modifier = Modifier.padding(top = 8.dp).clip(RoundedCornerShape(12.dp))
+        .background(Fog.Surface.copy(alpha = 0.9f)).padding(horizontal = 12.dp, vertical = 6.dp))
 }
 
 /** Short banner whenever a new street section is uncovered. */
@@ -414,85 +451,11 @@ internal fun RevealBanner(t: de.foggymap.app.TrackingUi) {
     }
 }
 
-private fun modeIcon(m: TravelMode) = when (m) {
-    TravelMode.CAR -> R.drawable.ic_car
-    TravelMode.BIKE -> R.drawable.ic_bike
-    else -> R.drawable.ic_walk
-}
-
 fun modeLabel(m: TravelMode) = when (m) {
     TravelMode.STILL -> "steht"
     TravelMode.WALK -> "zu Fuß"
     TravelMode.BIKE -> "Rad"
     TravelMode.CAR -> "Auto"
-}
-
-@Composable
-private fun ProgressRing(percent: Float, modifier: Modifier = Modifier) {
-    val sweep = (percent / 100f).coerceIn(0f, 1f) * 360f
-    Box(modifier, contentAlignment = Alignment.Center) {
-        androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
-            val stroke = androidx.compose.ui.graphics.drawscope.Stroke(width = 6.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
-            val inset = 3.dp.toPx()
-            val arcSize = androidx.compose.ui.geometry.Size(size.width - 2 * inset, size.height - 2 * inset)
-            val topLeft = androidx.compose.ui.geometry.Offset(inset, inset)
-            drawArc(Color.White.copy(alpha = 0.08f), 0f, 360f, false, topLeft, arcSize, style = stroke)
-            drawArc(Brush.sweepGradient(listOf(Fog.Cyan, Fog.Violet2, Fog.Violet, Fog.Cyan)), -90f, maxOf(sweep, 4f), false, topLeft, arcSize, style = stroke)
-        }
-        Text("${percent.toDouble().de(1)}%", color = Fog.Text, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-internal fun BottomCard(percent: Double?, counts: RevealDatabase.Counts?, t: de.foggymap.app.TrackingUi, onExpand: () -> Unit, onStart: () -> Unit) {
-    val animated by animateFloatAsState((percent ?: 0.0).toFloat(), tween(900), label = "pct")
-    GlassCard(Modifier.fillMaxWidth(), padding = 14.dp) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable(onClick = onExpand)) {
-            ProgressRing(animated, Modifier.size(66.dp))
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(if (percent == null) "Starte die Erkundung" else "deiner Umgebung erkundet", color = Fog.Muted, fontSize = 12.sp)
-                Spacer(Modifier.height(6.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    InlineStat(R.drawable.ic_road, "${(counts?.roadKm ?: 0.0).de(1)} km")
-                    InlineStat(R.drawable.ic_blocks, (counts?.blocks ?: 0).de())
-                    InlineStat(R.drawable.ic_building, (counts?.buildings ?: 0).de())
-                }
-            }
-            Box(Modifier.size(36.dp).clip(CircleShape).background(Fog.SurfaceHigh), contentAlignment = Alignment.Center) {
-                Icon(rememberVectorPainter(Icons.Filled.KeyboardArrowUp), "Statistiken", tint = Fog.Lavender)
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        if (!t.active) {
-            PrimaryButton("Erkundung starten", Modifier.fillMaxWidth(), icon = rememberVectorPainter(Icons.Filled.PlayArrow), onClick = onStart)
-        } else {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(10.dp).clip(CircleShape).background(Fog.Success))
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("DIESE TOUR", color = Fog.Violet2, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
-                    Text("${t.sessionSegments.de()} Abschnitte · ${(t.sessionMeters / 1000).de(2)} km", color = Fog.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                }
-                Row(Modifier.height(42.dp).clip(RoundedCornerShape(14.dp)).background(Fog.SurfaceHigh)
-                    .border(1.dp, Fog.Danger.copy(alpha = 0.35f), RoundedCornerShape(14.dp)).clickable(onClick = onStart)
-                    .padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(painterResource(R.drawable.ic_stop), null, tint = Fog.Danger, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text("Beenden", color = Fog.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun InlineStat(icon: Int, value: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(painterResource(icon), null, tint = Fog.Lavender, modifier = Modifier.size(14.dp))
-        Spacer(Modifier.width(4.dp))
-        Text(value, color = Fog.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-    }
 }
 
 fun hasPermission(c: Context, p: String) = c.checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
