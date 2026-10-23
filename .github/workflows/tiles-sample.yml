@@ -1,0 +1,23 @@
+name: Kachel-Stichprobe
+# Diagnostics only: fetches sample vector tiles + Overpass data and stores them in a private draft release.
+on:
+  workflow_dispatch:
+  push:
+    paths: ['scripts/tiles_sample.py', '.github/workflows/tiles-sample.yml']
+permissions:
+  contents: write
+jobs:
+  sample:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - run: python3 scripts/tiles_sample.py tiles-sample
+      - name: Upload (draft release, members only)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tar czf tiles-sample.tgz tiles-sample
+          ls -la tiles-sample.tgz
+          gh release view tiles-sample >/dev/null 2>&1 || gh release create tiles-sample --draft --title "Kachel-Stichprobe (intern)" --notes "Testdaten"
+          gh release upload tiles-sample tiles-sample.tgz --clobber
