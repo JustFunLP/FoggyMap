@@ -13,6 +13,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -407,8 +411,8 @@ internal fun StartStopButton(active: Boolean, modifier: Modifier = Modifier, onC
         Row(modifier.height(46.dp).clip(RoundedCornerShape(23.dp)).background(Fog.Surface.copy(alpha = 0.92f))
             .border(1.dp, Fog.Line, RoundedCornerShape(23.dp)).clickable(onClick = onClick).padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically) {
-            val pulse by androidx.compose.animation.core.rememberInfiniteTransition(label = "rec").animateFloat(0.35f, 1f,
-                androidx.compose.animation.core.infiniteRepeatable(tween(1100), androidx.compose.animation.core.RepeatMode.Reverse), label = "dot")
+            val pulse by rememberInfiniteTransition(label = "rec").animateFloat(0.35f, 1f,
+                infiniteRepeatable(tween<Float>(1100), RepeatMode.Reverse), label = "dot")
             Box(Modifier.size(9.dp).clip(CircleShape).background(Fog.Success.copy(alpha = pulse)))
             Spacer(Modifier.width(10.dp))
             Icon(painterResource(R.drawable.ic_stop), null, tint = Fog.Danger, modifier = Modifier.size(15.dp))
