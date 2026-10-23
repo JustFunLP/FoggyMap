@@ -62,13 +62,15 @@ class NostrGroupSync(private val relays: NostrRelays, private val secret: ByteAr
         var metaOk = false
         if (outgoing.isNotEmpty()) {
             val acks = relays.publish(outgoing.map { it.second })
-            val okIds = acks.filter { it.ok }.map { it.eventId }.toSet()
+            val stored = acks.filter { it.ok }.groupingBy { it.eventId }.eachCount()
+            val okIds = stored.keys
+            // A package only counts as done once at least two relays keep it; otherwise it is sent again next round.
+            val enough = minOf(REDUNDANCY, relays.urls.size)
             for ((i, e) in outgoing) if (i >= 0 && e.id in okIds) {
-                published[i] = hashes[i]!!
+                if ((stored[e.id] ?: 0) >= enough) { published[i] = hashes[i]!!; publishedCount++ }
                 store.markSynced(chunks[i].map { it.id })
-                publishedCount++
             }
-            metaOk = outgoing.any { (i, e) -> i == -1 && e.id in okIds }
+            metaOk = outgoing.any { (i, e) -> i == -1 && (stored[e.id] ?: 0) >= enough }
             if (okIds.isEmpty() && acks.isNotEmpty()) throw java.io.IOException(acks.first().message.ifEmpty { "Relays nehmen nichts an" })
         } else {
             // Nothing new to send: everything already published counts as synced.
@@ -124,6 +126,8 @@ class NostrGroupSync(private val relays: NostrRelays, private val secret: ByteAr
             else JSONObject().put("off", true)
         relays.publish(listOf(event(now, "l", "l", key.seal(content.toString()), expiration = now + if (on) 600 else 60)))
     }
+
+    companion object { const val REDUNDANCY = 2 }
 
     private fun event(now: Long, part: String, kind: String, content: String, expiration: Long? = null): NostrEvent {
         val tags = arrayListOf(listOf("d", NostrPacking.dTag(key.tag, part)), listOf("t", key.tag), listOf("k", kind))
