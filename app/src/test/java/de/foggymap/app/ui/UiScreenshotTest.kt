@@ -17,11 +17,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.test.captureToImage
-import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onRoot
+import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.unit.dp
 import de.foggymap.app.R
 import de.foggymap.app.TrackingUi
@@ -43,12 +41,16 @@ import java.io.FileOutputStream
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [34], qualifiers = "w400dp-h1900dp-xhdpi")
 class UiScreenshotTest {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
 
     private fun shot(name: String, content: @Composable () -> Unit) {
         compose.setContent { FoggyTheme { content() } }
         compose.waitForIdle()
-        val bmp = compose.onRoot().captureToImage().asAndroidBitmap()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        // Draw the window straight into a bitmap (captureToImage waits for a redraw Robolectric never sends).
+        val root = compose.activity.window.decorView.rootView
+        val bmp = Bitmap.createBitmap(root.width, root.height, Bitmap.Config.ARGB_8888)
+        root.draw(android.graphics.Canvas(bmp))
         val dir = File("build/screenshots").apply { mkdirs() }
         FileOutputStream(File(dir, "$name.png")).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
