@@ -64,6 +64,13 @@ class SyncManager(private val context: Context, private val db: RevealDatabase, 
     private val relays by lazy { NostrRelays(NostrRelays.DEFAULT, "FoggyMap/${BuildConfig.VERSION_NAME} (Android; https://github.com/JustFunLP/FoggyMap)") }
     @Volatile private var nostrGroup: NostrGroupSync? = null
     /** The group key derivation is deliberately slow (PBKDF2) – keep it per group. */
+    /** Live channel of the current group (only with the relays, not with an own server). */
+    fun liveChannel(): NostrLive? {
+        if (!usesNostr || prefs.groupCode.isEmpty()) return null
+        return NostrLive(relays.urls, "FoggyMap/${BuildConfig.VERSION_NAME} (Android; https://github.com/JustFunLP/FoggyMap)",
+            prefs.nostrSecret(), nostr().key)
+    }
+
     private fun nostr(code: String = prefs.groupCode): NostrGroupSync =
         nostrGroup?.takeIf { it.code == code } ?: NostrGroupSync(relays, prefs.nostrSecret(), code).also { if (code == prefs.groupCode) nostrGroup = it }
 
@@ -245,6 +252,7 @@ class SyncManager(private val context: Context, private val db: RevealDatabase, 
             db.markAllUnsynced()        // bring own progress into the new group
         }
         refreshState()
+        App.live.refresh()
     }
 
     fun leaveGroup() {
@@ -254,6 +262,7 @@ class SyncManager(private val context: Context, private val db: RevealDatabase, 
         prefs.nostrSince = 0; prefs.nostrPublished = HashMap(); prefs.nostrMetaHash = ""
         state.value = SyncUi(server = server)
         refreshState()
+        App.live.refresh()
     }
 
     suspend fun pushLive(lat: Double, lon: Double) = withContext(Dispatchers.IO) {

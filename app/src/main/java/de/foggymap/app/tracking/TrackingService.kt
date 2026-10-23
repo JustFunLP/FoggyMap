@@ -123,6 +123,8 @@ class TrackingService : Service() {
         if (intent?.action == ACTION_SETTINGS_CHANGED) {
             scope.launch { explorer?.settings = App.prefs.revealSettings(); radius.reset() }
             if (!App.prefs.shareLiveLocation) App.scope.launch { App.sync.clearLive() }
+            App.live.refresh()
+            locations.liveMode = App.prefs.shareLiveLocation && App.sync.configured
             return START_STICKY
         }
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
@@ -154,7 +156,11 @@ class TrackingService : Service() {
             locations.lastKnown()?.let { last -> prefetch(LatLon(last.latitude, last.longitude)) }
             queue.peekLast()?.let { publishTrail(it.pos, force = true) }
         }
+        locations.liveMode = App.prefs.shareLiveLocation && App.sync.configured
+        App.live.setSending(true)
         locations.apply(LocationController.Profile.MOVING)
+        // Know where you are right away – no need to take a few steps first.
+        locations.pingNow { loc -> scope.launch { onLocations(listOf(loc)) } }
         lastGoodFixAt = SystemClock.elapsedRealtime()
         scope.launch { App.remoteRoads.collect { ids -> explorer?.markKnown(ids) } }
         scope.launch { housekeeping() }
@@ -169,7 +175,8 @@ class TrackingService : Service() {
             val ageMs = (SystemClock.elapsedRealtimeNanos() - loc.elapsedRealtimeNanos) / 1_000_000
             if (ageMs > 15 * 60_000) continue
             lastLocation = loc
-            App.location.value = loc
+            App.showLocation(loc)
+            App.live.onPosition(loc)
             if (loc.hasAccuracy() && loc.accuracy <= 35f) lastGoodFixAt = SystemClock.elapsedRealtime()
             val fix = Fix(loc.latitude, loc.longitude, if (loc.hasAccuracy() && loc.accuracy > 0f) loc.accuracy.toDouble() else 25.0, loc.time,
                 if (loc.hasSpeed()) loc.speed.toDouble() else null,
@@ -215,6 +222,7 @@ class TrackingService : Service() {
             }
             if (step.items.isNotEmpty()) {
                 val added = withContext(Dispatchers.IO) { App.db.insert(step.items, RevealDatabase.OWNER_ME, synced = false) }
+                App.live.queueItems(added)
                 if (added.isNotEmpty()) revealBuildingsFor(added)
                 if (added.isNotEmpty()) {
                     android.util.Log.i("FoggyMap", "revealed ${step.segments.joinToString { it.name ?: it.id }}: ${added.size} new items")
@@ -305,6 +313,7 @@ class TrackingService : Service() {
         if (items.isEmpty()) return
         val added = withContext(Dispatchers.IO) { App.db.insert(items, RevealDatabase.OWNER_ME, synced = false) }
         if (added.isEmpty()) return
+        App.live.queueItems(added)
         App.notifyDbChanged(); App.sync.requestSync()
         revealBuildingsFor(added)
     }
@@ -336,7 +345,7 @@ class TrackingService : Service() {
     private suspend fun storeBuildings(items: List<de.foggymap.app.core.RevealItem>): Int {
         if (items.isEmpty()) return 0
         val added = withContext(Dispatchers.IO) { App.db.insert(items, RevealDatabase.OWNER_ME, synced = false) }
-        if (added.isNotEmpty()) { App.notifyDbChanged(); App.sync.requestSync() }
+        if (added.isNotEmpty()) { App.live.queueItems(added); App.notifyDbChanged(); App.sync.requestSync() }
         return added.size
     }
 
@@ -503,6 +512,7 @@ class TrackingService : Service() {
 
     private fun shutdown() {
         locations.stop()
+        App.live.setSending(false)
         App.tracking.update { it.copy(active = false, message = null, loadingMap = false) }
         if (App.prefs.shareLiveLocation) App.scope.launch { App.sync.clearLive() }
         App.scope.launch {

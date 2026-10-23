@@ -50,14 +50,17 @@ class Updater(private val context: Context) {
 
     val enabled get() = BuildConfig.UPDATE_BASE.isNotEmpty() && !BuildConfig.DEBUG
 
-    /** Checks at most once per [minIntervalMs]; returns true when a newer version exists. */
-    suspend fun check(force: Boolean = false, minIntervalMs: Long = 30 * 60_000L): Boolean = withContext(Dispatchers.IO) {
+    /**
+     * Checks at most once per [minIntervalMs]; returns true when a newer version exists.
+     * [remember] = false for the background check, so the app still checks itself when it is opened.
+     */
+    suspend fun check(force: Boolean = false, minIntervalMs: Long = 30 * 60_000L, remember: Boolean = true): Boolean = withContext(Dispatchers.IO) {
         if (!enabled) return@withContext false
         val now = System.currentTimeMillis()
         if (!force && now - prefs.getLong("last_check", 0) < minIntervalMs) {
             return@withContext state.value is State.Available
         }
-        prefs.edit().putLong("last_check", now).apply()
+        if (remember) prefs.edit().putLong("last_check", now).apply()
         state.value = State.Checking
         try {
             val req = Request.Builder().url(BuildConfig.UPDATE_BASE + "version.json?t=$now")

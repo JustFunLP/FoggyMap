@@ -9,7 +9,7 @@ Alles hier geht im Browser bzw. der GitHub-App auf dem Android-Handy. Ein PC ist
 1. Öffne auf dem Handy **github.com/JustFunLP/FoggyMap/releases** (ein GitHub-Konto ist nicht nötig, das Repository ist öffentlich).
 2. Tippe bei **„FoggyMap – neueste Version“** unter *Assets* auf **FoggyMap.apk**.
 3. Nach dem Download auf die Datei tippen. Android fragt beim ersten Mal, ob dein Browser Apps installieren darf: **„Zulassen“** → zurück → **Installieren**.
-4. **Updates kommen danach von selbst:** Beim Öffnen prüft FoggyMap, ob es eine neuere Version gibt, und fragt *„Update verfügbar – Installieren?“*. Beim allerersten Update bittet Android einmalig um die Erlaubnis *„Apps aus dieser Quelle zulassen“* für FoggyMap. Die neue Version wird **über** die alte installiert, deine Erkundung bleibt erhalten (gleicher Signierschlüssel, die Datei wird vor der Installation per Prüfsumme kontrolliert). Von Hand: Menü → App → **„Prüfen“**.
+4. **Updates kommen danach von selbst:** Gibt es eine neue Version, meldet FoggyMap das innerhalb von ein paar Stunden per Benachrichtigung, auch wenn die App gerade nicht offen ist. Beim Öffnen prüft FoggyMap, ob es eine neuere Version gibt, und fragt *„Update verfügbar – Installieren?“*. Beim allerersten Update bittet Android einmalig um die Erlaubnis *„Apps aus dieser Quelle zulassen“* für FoggyMap. Die neue Version wird **über** die alte installiert, deine Erkundung bleibt erhalten (gleicher Signierschlüssel, die Datei wird vor der Installation per Prüfsumme kontrolliert). Von Hand: Menü → App → **„Prüfen“**.
 
 > Google Play Protect kann warnen („Unbekannte App“). Das ist bei selbst gebauten Apps normal: *Weitere Details → Trotzdem installieren*.
 
@@ -20,7 +20,7 @@ Alles hier geht im Browser bzw. der GitHub-App auf dem Android-Handy. Ein PC ist
    - Standort: **„Während der Nutzung der App“** und **„Genau“** wählen.
    - Benachrichtigungen: **Zulassen** (zeigt, dass aufgezeichnet wird).
 3. Losgehen, -radeln oder -fahren. Sobald du eine Straße betrittst, verschwindet der Nebel über dem ganzen Abschnitt bis zur nächsten Kreuzung und über den angrenzenden Häuserblöcken.
-4. Das Handy darf in die Tasche, der Bildschirm darf aus sein. Beenden über **„Beenden“** unten auf der Karte oder in der Benachrichtigung.
+4. Das Handy darf in die Tasche, der Bildschirm darf aus sein. Beenden über **„Erkundung beenden“** unten auf der Karte oder in der Benachrichtigung.
 5. **Drei Knöpfe rechts unten auf der Karte:**
    - **Kompass:** Die Nadel zeigt immer nach Norden. Ein Tipp dreht die Karte nach Norden und hält sie so, auch wenn sie auf dich fixiert ist (der Knopf leuchtet dann). Noch ein Tipp: wieder deine Blickrichtung oben.
    - **2D / 3D:** wechselt zwischen flacher Karte und geneigter 3D-Ansicht.
@@ -52,7 +52,7 @@ Es muss **nichts eingerichtet** werden: kein Server, kein Konto, kein GitHub. Al
 
 **Wie funktioniert das ohne Server?** Die Funde laufen über mehrere öffentliche **Nostr-Relays** (frei nutzbare Nachrichten-Server, die jeder verwenden darf). Alles ist mit eurem Gruppencode **verschlüsselt** (AES-256). Die Relays sehen nur unlesbare Pakete, keine Namen, keine Orte. Die App schreibt gleichzeitig an fünf Relays, damit nichts verloren geht, wenn eines ausfällt. Deine eigenen Funde bleiben ohnehin immer auf deinem Handy.
 
-**Was wird geteilt?** Nur aufgedeckte Flächen, Kilometerzahlen und der Anzeigename. Der GPS-Verlauf wird nie übertragen. Den Live-Standort sehen andere nur, wenn du ihn in *Menü → Koop → Live-Standort* ausdrücklich einschaltest. Er verfällt nach 10 Minuten.
+**Was wird geteilt?** Nur aufgedeckte Flächen, Kilometerzahlen und der Anzeigename. Der GPS-Verlauf wird nie übertragen. Den Live-Standort sehen andere nur, wenn du ihn in *Menü → Koop → Live-Standort* ausdrücklich einschaltest. Dann sehen sie dich während der Erkundung alle 2–3 Sekunden, inklusive dem, was du gerade aufdeckst (kostet etwas mehr Akku). Nach dem Ausschalten oder Beenden verschwindet deine Position.
 Aus den aufgedeckten Flächen ist erkennbar, wo du unterwegs warst. Gib den Gruppencode deshalb nur Leuten, die das sehen dürfen. Wer den Code kennt, kann beitreten und alles sehen.
 
 ---

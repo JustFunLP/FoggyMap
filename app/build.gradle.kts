@@ -89,6 +89,7 @@ dependencies {
 
     implementation("org.maplibre.gl:android-sdk:11.8.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("org.locationtech.jts:jts-core:1.20.0")
 
     testImplementation("junit:junit:4.13.2")

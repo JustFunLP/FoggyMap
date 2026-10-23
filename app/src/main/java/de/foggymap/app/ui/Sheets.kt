@@ -329,7 +329,7 @@ internal fun CoopTab(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> U
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Live-Standort mit der Gruppe teilen", fontSize = 14.sp)
-                    Text("Aus = deine Position wird nie übertragen. An = während der Erkundung etwa minütlich, verfällt nach 10 Minuten.",
+                    Text("Aus = deine Position wird nie übertragen. An = während der Erkundung alle 2–3 Sekunden: deine Figur, deine Blickrichtung und was du gerade aufdeckst. Kostet etwas mehr Akku.",
                         color = Fog.Muted, fontSize = 11.sp, lineHeight = 14.sp)
                 }
                 Switch(shareLive, { on ->
@@ -337,6 +337,7 @@ internal fun CoopTab(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> U
                         confirmLive = true
                     } else {
                         shareLive = false; App.prefs.shareLiveLocation = false; scope.launch { App.sync.clearLive() }
+                        App.live.refresh(); de.foggymap.app.tracking.TrackingService.settingsChanged(context)
                     }
                 }, colors = fogSwitchColors())
             }
@@ -361,8 +362,11 @@ internal fun CoopTab(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> U
     if (confirmLive) AlertDialog(
         onDismissRequest = { confirmLive = false }, containerColor = Fog.Surface, titleContentColor = Fog.Text, textContentColor = Fog.Text,
         title = { Text("Live-Standort teilen?") },
-        text = { Text("Während die Erkundung läuft, sehen alle Gruppenmitglieder deine aktuelle Position (auf ca. 1 m gerundet, Aktualisierung etwa jede Minute). Du kannst das jederzeit wieder ausschalten.") },
-        confirmButton = { TextButton(onClick = { confirmLive = false; shareLive = true; App.prefs.shareLiveLocation = true }) { Text("Teilen", color = Fog.Violet2) } },
+        text = { Text("Während die Erkundung läuft, sehen alle Gruppenmitglieder live, wo du bist und wohin du schaust (alle 2–3 Sekunden, verschlüsselt). Du kannst das jederzeit wieder ausschalten.") },
+        confirmButton = { TextButton(onClick = {
+            confirmLive = false; shareLive = true; App.prefs.shareLiveLocation = true
+            App.live.refresh(); de.foggymap.app.tracking.TrackingService.settingsChanged(context)
+        }) { Text("Teilen", color = Fog.Violet2) } },
         dismissButton = { TextButton(onClick = { confirmLive = false }) { Text("Abbrechen", color = Fog.Muted) } },
     )
     if (confirmLeave) AlertDialog(

@@ -55,6 +55,10 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         if (intent?.action == Intent.ACTION_SEND) intent.getStringExtra(Intent.EXTRA_TEXT)?.let { pendingInvite = it }
+        // Tapped the "new version" notification: check right away, the update dialog follows.
+        if (intent?.getBooleanExtra(de.foggymap.app.data.UpdateCheckWorker.EXTRA_UPDATE, false) == true) {
+            App.scope.launch { App.updater.check(force = true) }
+        }
         // Automated emulator test (debug build only): skip onboarding and start exploring.
         if (BuildConfig.DEBUG && intent?.getBooleanExtra("e2e_autostart", false) == true) {
             App.prefs.onboardingDone = true

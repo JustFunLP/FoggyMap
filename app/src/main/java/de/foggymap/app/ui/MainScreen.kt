@@ -199,7 +199,9 @@ fun MainScreen(activity: MainActivity) {
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, tracking.active, following, locationEnabled) {
         val lm = context.getSystemService(LocationManager::class.java)
-        val listener = android.location.LocationListener { loc -> if (!App.tracking.value.active) App.location.value = loc }
+        val listener = object : androidx.core.location.LocationListenerCompat {
+            override fun onLocationChanged(location: android.location.Location) { if (!App.tracking.value.active) App.showLocation(location) }
+        }
         var registered = false
         fun startUiLocation() {
             if (tracking.active || !following || registered || !MainActivity.hasFineLocation(context)) return
@@ -207,12 +209,23 @@ fun MainScreen(activity: MainActivity) {
                 if (Build.VERSION.SDK_INT >= 31 && lm.allProviders.contains(LocationManager.FUSED_PROVIDER)) add(LocationManager.FUSED_PROVIDER)
                 else { add(LocationManager.GPS_PROVIDER); add(LocationManager.NETWORK_PROVIDER) }
             }
-            for (pr in providers) runCatching { lm.requestLocationUpdates(pr, 1000L, 0f, listener, android.os.Looper.getMainLooper()); registered = true }
+            // High accuracy (satellites), not the default Wi-Fi/cell quality – the figure should stand where you stand.
+            val request = androidx.core.location.LocationRequestCompat.Builder(1000L)
+                .setQuality(androidx.core.location.LocationRequestCompat.QUALITY_HIGH_ACCURACY).setMinUpdateDistanceMeters(0f).build()
+            for (pr in providers) runCatching {
+                androidx.core.location.LocationManagerCompat.requestLocationUpdates(lm, pr, request, androidx.core.content.ContextCompat.getMainExecutor(context), listener)
+                registered = true
+            }
         }
-        fun stopUiLocation() { if (registered) { runCatching { lm.removeUpdates(listener) }; registered = false } }
+        fun stopUiLocation() { if (registered) { runCatching { androidx.core.location.LocationManagerCompat.removeUpdates(lm, listener) }; registered = false } }
         val obs = LifecycleEventObserver { _, e ->
             when (e) {
-                Lifecycle.Event.ON_RESUME -> { compass.start(); startUiLocation() }
+                Lifecycle.Event.ON_RESUME -> {
+                    compass.start(); startUiLocation()
+                    // Where am I right now? One accurate fix as soon as the app is open – no need to walk first.
+                    if (!App.tracking.value.active && MainActivity.hasFineLocation(context))
+                        de.foggymap.app.tracking.LocationController.currentLocation(context) { loc -> if (!App.tracking.value.active) App.showLocation(loc) }
+                }
                 Lifecycle.Event.ON_PAUSE -> { compass.stop(); stopUiLocation() }
                 else -> {}
             }
@@ -220,14 +233,16 @@ fun MainScreen(activity: MainActivity) {
         lifecycleOwner.lifecycle.addObserver(obs)
         onDispose { lifecycleOwner.lifecycle.removeObserver(obs); compass.stop(); stopUiLocation() }
     }
-    LaunchedEffect(controller, syncUi.members) { controller?.showFriends(syncUi.members) }
+    val liveFriends by App.live.friends.collectAsState()
+    LaunchedEffect(controller, syncUi.members, liveFriends) { controller?.showFriends(syncUi.members, liveFriends) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle, currentController) {
         val c = currentController
         val obs = LifecycleEventObserver { _, e ->
             when (e) {
-                Lifecycle.Event.ON_RESUME -> { c?.startAmbient(); App.sync.requestSync(1_000) }
-                Lifecycle.Event.ON_PAUSE -> c?.stopAmbient()
+                // Friends' live positions only while the map is on screen.
+                Lifecycle.Event.ON_RESUME -> { c?.startAmbient(); App.sync.requestSync(1_000); App.live.setListening(App.sync.state.value.inGroup) }
+                Lifecycle.Event.ON_PAUSE -> { c?.stopAmbient(); App.live.setListening(false) }
                 else -> {}
             }
         }
@@ -411,19 +426,21 @@ internal fun PerspectiveButton(tilted: Boolean, onClick: () -> Unit) {
 /** Start exploring (big button) – while it runs only a small "Beenden" pill with a recording dot. */
 @Composable
 internal fun StartStopButton(active: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    // Both states have exactly the same size and place, so the button never jumps.
+    val shape = RoundedCornerShape(18.dp)
     if (!active) {
         PrimaryButton("Erkundung starten", modifier.widthIn(max = 240.dp).fillMaxWidth(), icon = rememberVectorPainter(Icons.Filled.PlayArrow), onClick = onClick)
     } else {
-        Row(modifier.height(46.dp).clip(RoundedCornerShape(23.dp)).background(Fog.Surface.copy(alpha = 0.92f))
-            .border(1.dp, Fog.Line, RoundedCornerShape(23.dp)).clickable(onClick = onClick).padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically) {
+        Row(modifier.widthIn(max = 240.dp).fillMaxWidth().height(54.dp).clip(shape).background(Fog.Surface.copy(alpha = 0.95f))
+            .border(1.dp, Fog.Danger.copy(alpha = 0.45f), shape).clickable(onClick = onClick).padding(horizontal = 18.dp),
+            horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
             val pulse by rememberInfiniteTransition(label = "rec").animateFloat(0.35f, 1f,
                 infiniteRepeatable(tween<Float>(1100), RepeatMode.Reverse), label = "dot")
-            Box(Modifier.size(9.dp).clip(CircleShape).background(Fog.Success.copy(alpha = pulse)))
+            Box(Modifier.size(10.dp).clip(CircleShape).background(Fog.Success.copy(alpha = pulse)))
             Spacer(Modifier.width(10.dp))
-            Icon(painterResource(R.drawable.ic_stop), null, tint = Fog.Danger, modifier = Modifier.size(15.dp))
-            Spacer(Modifier.width(7.dp))
-            Text("Beenden", color = Fog.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+            Icon(painterResource(R.drawable.ic_stop), null, tint = Fog.Danger, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Erkundung beenden", color = Fog.Text, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, letterSpacing = 0.5.sp)
         }
     }
 }

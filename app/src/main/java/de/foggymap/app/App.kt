@@ -57,6 +57,7 @@ object App {
     lateinit var tiles: TileRepository; private set
     lateinit var sync: SyncManager; private set
     lateinit var updater: Updater; private set
+    lateinit var live: de.foggymap.app.data.LiveLink; private set
 
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -66,6 +67,16 @@ object App {
     val remoteRoads = MutableSharedFlow<List<String>>(extraBufferCapacity = 32)
     val tracking = MutableStateFlow(TrackingUi())
     val location = MutableStateFlow<Location?>(null)
+    private val displayFilter = de.foggymap.app.core.PositionFilter()
+
+    /** Your position for the map: steadied while you stand (see PositionFilter), immediate while you move. */
+    fun showLocation(loc: Location) {
+        val e = synchronized(displayFilter) {
+            displayFilter.update(loc.latitude, loc.longitude, if (loc.hasAccuracy()) loc.accuracy.toDouble() else 30.0, loc.time,
+                if (loc.hasSpeed()) loc.speed.toDouble() else null)
+        }
+        location.value = Location(loc).apply { latitude = e.lat; longitude = e.lon; accuracy = e.accuracy.toFloat() }
+    }
     val coverage = MutableStateFlow<Coverage?>(null)
     /**
      * Your recent path as a light trail (drawn immediately, before any map data is needed) –
@@ -80,7 +91,9 @@ object App {
         tiles = TileRepository(app)
         sync = SyncManager(app, db, prefs)
         updater = Updater(app)
+        live = de.foggymap.app.data.LiveLink(sync, db, prefs)
         sync.init()
+        de.foggymap.app.data.UpdateCheckWorker.schedule(app)
         scope.launch { refreshCoverage() }
     }
 

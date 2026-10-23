@@ -44,6 +44,12 @@ class LocationController(private val context: Context, private val onLocations: 
     private var screenOn = true
     /** Paused at a place where you often stand: check less often. */
     var atKnownPlace = false
+    /**
+     * Live position shared with the group (explicitly switched on): no batching, so friends see you move
+     * every 2–3 s also with the screen off. Costs some battery – that is the price of "live".
+     */
+    var liveMode = false
+        set(v) { if (field != v) { field = v; profile?.let { apply(it, force = true) } } }
     private var subscribed = false
     var onSignificantMotion: (() -> Unit)? = null
 
@@ -103,7 +109,7 @@ class LocationController(private val context: Context, private val onLocations: 
         profile = p
         stopUpdates()
         val params = params(p)
-        val batch = if (batchingAllowed && !screenOn && p != Profile.STILL) params.interval * params.batchFactor else 0L
+        val batch = if (batchingAllowed && !screenOn && !liveMode && p != Profile.STILL) params.interval * params.batchFactor else 0L
         batchDelayMs = batch
         lastDelivery = android.os.SystemClock.elapsedRealtime()
         val request = LocationRequestCompat.Builder(params.interval)
@@ -173,7 +179,8 @@ class LocationController(private val context: Context, private val onLocations: 
 
     @SuppressLint("MissingPermission")
     fun lastKnown(): Location? = try {
-        listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
+        listOfNotNull(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) LocationManager.FUSED_PROVIDER else null)
             .mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
             .maxByOrNull { it.time }
     } catch (_: SecurityException) { null }
@@ -187,14 +194,21 @@ class LocationController(private val context: Context, private val onLocations: 
         val gps = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
         val network = runCatching { lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(false)
         val fused = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && lm.allProviders.contains(LocationManager.FUSED_PROVIDER)
+        // The fused provider (Android 12+) combines satellites with Wi-Fi, cell and motion sensors – noticeably
+        // steadier and closer to the truth between tall buildings than raw GPS. With high accuracy it still
+        // uses the satellites; without it (or with GPS off) we fall back to plain GPS.
         return when {
             p == Profile.STILL && fused -> LocationManager.FUSED_PROVIDER
             p == Profile.STILL && network -> LocationManager.NETWORK_PROVIDER
+            fused && gps -> LocationManager.FUSED_PROVIDER
             gps -> LocationManager.GPS_PROVIDER
             fused -> LocationManager.FUSED_PROVIDER
             else -> LocationManager.GPS_PROVIDER
         }
     }
+
+    /** One fresh, accurate position right now (no need to walk first). */
+    fun pingNow(onFix: (Location) -> Unit) = currentLocation(context, onFix)
 
     private data class Params(val interval: Long, val minDistance: Float, val quality: Int, val batchFactor: Long)
 
@@ -218,5 +232,29 @@ class LocationController(private val context: Context, private val onLocations: 
     private fun disarmMotionSensor() {
         val s = sensors?.getDefaultSensor(Sensor.TYPE_SIGNIFICANT_MOTION) ?: return
         runCatching { sensors.cancelTriggerSensor(motion, s) }
+    }
+
+    companion object {
+        /**
+         * Asks once for the current position with high accuracy (satellites + Wi-Fi). Usually answers within a
+         * few seconds; a cold GPS can take up to ~30 s. Used when the app opens and when exploring starts.
+         */
+        @SuppressLint("MissingPermission")
+        fun currentLocation(context: Context, onFix: (Location) -> Unit) {
+            val lm = context.getSystemService(LocationManager::class.java) ?: return
+            val executor = ContextCompat.getMainExecutor(context)
+            val signal = android.os.CancellationSignal()
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && lm.allProviders.contains(LocationManager.FUSED_PROVIDER)) {
+                    val req = android.location.LocationRequest.Builder(0).setQuality(android.location.LocationRequest.QUALITY_HIGH_ACCURACY)
+                        .setDurationMillis(30_000).build()
+                    lm.getCurrentLocation(LocationManager.FUSED_PROVIDER, req, signal, executor) { loc -> if (loc != null) onFix(loc) }
+                } else {
+                    LocationManagerCompat.getCurrentLocation(lm, LocationManager.GPS_PROVIDER, signal, executor,
+                        androidx.core.util.Consumer<Location> { loc -> if (loc != null) onFix(loc) })
+                }
+                Handler(Looper.getMainLooper()).postDelayed({ signal.cancel() }, 35_000)
+            } catch (_: SecurityException) { } catch (_: IllegalArgumentException) { }
+        }
     }
 }

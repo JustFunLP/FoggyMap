@@ -7,6 +7,7 @@ import de.foggymap.app.core.RevealItem
 import de.foggymap.app.core.Schnorr
 import de.foggymap.app.core.TestWorlds
 import de.foggymap.app.data.NostrGroupSync
+import de.foggymap.app.data.NostrLive
 import de.foggymap.app.data.NostrRelays
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -87,5 +88,42 @@ class NostrRelayCheck {
         // A second round without changes publishes nothing.
         assertEquals(0, a.sync(sa, pa, ra3.newest, null).published)
         assertTrue(sa.synced.containsAll(aItems.map { it.id }))
+    }
+
+    /** Live channel: ephemeral events must arrive at a listening member within seconds. */
+    private fun liveRoundTrip(urls: List<String>, messages: Int = 4): Pair<Int, Long> {
+        val code = code(); val g = GroupKey(code)
+        val ua = "FoggyMap-CI/1.0 (+https://github.com/JustFunLP/FoggyMap)"
+        val a = NostrLive(urls, ua, Schnorr.newSecretKey(), g)
+        val b = NostrLive(urls, ua, Schnorr.newSecretKey(), g)
+        val got = java.util.Collections.synchronizedList(ArrayList<Pair<NostrLive.Live, Long>>())
+        b.onLive = { got += it to System.currentTimeMillis() }
+        b.start(listen = true); a.start(listen = false)
+        val t0 = System.currentTimeMillis()
+        while ((a.connectedRelays < urls.size || b.connectedRelays < urls.size) && System.currentTimeMillis() - t0 < 10_000) Thread.sleep(100)
+        Thread.sleep(1_000)   // let the subscription settle
+        val sentAt = ArrayList<Long>()
+        val item = TestWorlds.grid().let { m -> m.segments.first { it.matchable }.let { m.reveal(it).first() } }
+        for (k in 0 until messages) {
+            sentAt += System.currentTimeMillis()
+            a.send("Anna", 52.5438 + k * 1e-5, 13.4177, 90.0, 1.4, if (k == 0) listOf(item) else emptyList())
+            Thread.sleep(1_000)
+        }
+        Thread.sleep(3_000)
+        a.stop(); b.stop()
+        val received = got.map { it.first.lat }.distinct().size
+        val delay = if (got.isEmpty()) -1 else got.minOf { it.second } - sentAt.first()
+        if (got.isNotEmpty()) assertTrue("reveals travel with the live message", got.any { it.first.items.isNotEmpty() })
+        return received to delay
+    }
+
+    @Test fun liveEverySecondsThroughTheDefaultRelays() {
+        for (url in NostrRelays.DEFAULT) {
+            val (n, ms) = liveRoundTrip(listOf(url), 3)
+            note("::notice title=Live über $url::$n/3 Live-Nachrichten angekommen" + if (ms >= 0) ", erste nach $ms ms" else "")
+        }
+        val (n, ms) = liveRoundTrip(NostrRelays.DEFAULT, 4)
+        note("::notice title=Live über alle Relays::$n/4 Live-Nachrichten angekommen, erste nach $ms ms")
+        assertTrue("live messages arrive through the default relays", n >= 3)
     }
 }

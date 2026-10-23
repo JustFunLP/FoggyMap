@@ -141,12 +141,13 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
             lineWidth(interpolate(linear(), zoom(), stop(12, 1.2f), stop(18, 3.4f))), lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
         // Revealed buildings in 3D as a night city: facades with lit windows, dark flat roofs on top.
         // Every building is at least ~8 m high, so houses without height data still read as 3D.
-        style.addImage(IMG_WINDOWS, WindowTexture.create())
+        style.addImage(IMG_WINDOWS, WindowTexture.create(context.resources.displayMetrics.density.toInt().coerceAtLeast(1)))
         add(FillExtrusionLayer(L_BLDG, SRC_BLDG).withProperties(fillExtrusionPattern(IMG_WINDOWS),
             fillExtrusionHeight(shownHeight()), fillExtrusionBase(get("mh")), fillExtrusionOpacity(1f),
             fillExtrusionVerticalGradient(true)).also { it.minZoom = 13.5f })
         add(FillExtrusionLayer(L_BLDG_ROOF, SRC_BLDG).withProperties(fillExtrusionColor(ROOF),
-            fillExtrusionHeight(sum(shownHeight(), literal(0.6f))), fillExtrusionBase(subtract(shownHeight(), literal(0.4f))),
+            // The roof slab starts exactly where the facade ends: no overlapping walls, so nothing z-fights (flickers).
+            fillExtrusionHeight(sum(shownHeight(), literal(0.6f))), fillExtrusionBase(shownHeight()),
             fillExtrusionOpacity(1f), fillExtrusionVerticalGradient(false)).also { it.minZoom = 13.5f })
         add(FillExtrusionLayer(L_BLDG_NEW, SRC_BLDG_NEW).withProperties(fillExtrusionPattern(IMG_WINDOWS),
             fillExtrusionHeight(literal(0f)), fillExtrusionBase(get("mh")), fillExtrusionOpacity(1f),
@@ -258,7 +259,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
                 val rise = ((t - 0.25f) / 0.75f).coerceIn(0f, 1f)
                 val h = product(shownHeight(), literal(rise))
                 rising?.setProperties(fillExtrusionHeight(h))
-                risingRoof?.setProperties(fillExtrusionHeight(sum(h, literal(0.6f))), fillExtrusionBase(subtract(h, literal(0.4f))))
+                risingRoof?.setProperties(fillExtrusionHeight(sum(h, literal(0.6f))), fillExtrusionBase(h))
             }
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
@@ -291,9 +292,14 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
 
     fun stopAmbient() { breathing?.cancel(); breathing = null }
 
-    fun showFriends(members: List<GroupMember>) {
-        val features = members.filter { !it.isMe && it.live != null }.map { m ->
-            FogBuilder.feature(FogBuilder.pointJson(m.live!!), "\"name\":${org.json.JSONObject.quote(m.name)}")
+    /** Group members on the map: the live channel (every 2–3 s) wins over the slower member cards. */
+    fun showFriends(members: List<GroupMember>, live: Map<String, de.foggymap.app.data.LiveFriend>) {
+        val now = System.currentTimeMillis()
+        val pos = LinkedHashMap<String, Pair<String, LatLon>>()
+        members.filter { !it.isMe && it.live != null }.forEach { pos[it.key] = it.name to it.live!! }
+        live.values.filter { now - it.atMs < de.foggymap.app.data.LiveLink.STALE_MS }.forEach { pos[it.key] = it.name to it.pos }
+        val features = pos.values.map { (name, p) ->
+            FogBuilder.feature(FogBuilder.pointJson(p), "\"name\":${org.json.JSONObject.quote(name)}")
         }
         source(SRC_FRIENDS)?.setGeoJson(FogBuilder.featureCollection(features))
     }
