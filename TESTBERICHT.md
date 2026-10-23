@@ -14,7 +14,7 @@ Stand: 23.10.2026. Alle Ergebnisse stammen aus echten Läufen, die du jederzeit 
 
 ## ✅ Automatisch getestet
 
-**1. Kernlogik (73 Unit-Tests, laufen bei jedem Build)**
+**1. Kernlogik (58 Unit-Tests, laufen bei jedem Build)**
 - Straßenaufteilung: Teilung an Kreuzungen, Fußwege teilen keine Straßen, Brücken bilden keine Kreuzung, Gehwege und Zufahrten werden ignoriert, lange Landstraßen werden gestückelt, die IDs sind kachelübergreifend stabil.
 - **Straßennetz aus Vektorkacheln (neu, ersetzt Overpass):** Mit künstlich erzeugten Kacheln (Schnitt an Kachelrändern, weggekürzte Kreuzungspunkte) und mit **echten OpenFreeMap-Kacheln** aus Odenthal (Dorf) und Berlin-Prenzlauer Berg, verglichen mit den Overpass-Daten derselben Gegend vom selben Tag:
   - 62 von 62 bzw. 65 von 65 echten Kreuzungen gefunden, keine Straße fehlt.

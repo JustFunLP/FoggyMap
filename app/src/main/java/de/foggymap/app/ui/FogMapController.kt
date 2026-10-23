@@ -375,18 +375,18 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
     /** Compass azimuth (true north) from the phone's rotation sensor; null when not available. */
     fun updateCompass(azimuth: Double?) {
         compass = azimuth
-        updateHeading()
-        kick()
+        if (updateHeading()) kick()   // tiny sensor jitter never causes a redraw
     }
 
     /** Course over ground while riding/driving (also through a short stop), otherwise the compass. */
-    private fun updateHeading() {
+    private fun updateHeading(): Boolean {
         val c = course
         val useCourse = c != null && android.os.SystemClock.elapsedRealtime() - courseAt < 20_000
-        val h = (if (useCourse) c else compass ?: c) ?: return
-        if (hasBearing && kotlin.math.abs(angleDelta(targetBearing, h)) < 1.5) return   // ignore sensor jitter
+        val h = (if (useCourse) c else compass ?: c) ?: return false
+        if (hasBearing && kotlin.math.abs(angleDelta(targetBearing, h)) < 1.5) return false   // ignore sensor jitter
         targetBearing = norm(h)
         if (!hasBearing) { puckBearing = targetBearing; hasBearing = true }
+        return true
     }
 
     private fun kick() {
@@ -410,8 +410,12 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         setPuck(np, nb)
         if (follow == Follow.FOLLOW && !gestureActive && !entering) {
             val cp = map.cameraPosition
-            map.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder().target(np).zoom(cp.zoom).tilt(cp.tilt)
-                .bearing(if (hasBearing) nb else cp.bearing).padding(0.0, topPad(), 0.0, 0.0).build()))
+            val bearing = if (hasBearing) nb else cp.bearing
+            val t = cp.target
+            val moved = t == null || kotlin.math.abs(t.latitude - np.latitude) > 2e-7 || kotlin.math.abs(t.longitude - np.longitude) > 2e-7 ||
+                kotlin.math.abs(angleDelta(cp.bearing, bearing)) > 0.05
+            if (moved) map.moveCamera(CameraUpdateFactory.newCameraPosition(CameraPosition.Builder().target(np).zoom(cp.zoom).tilt(cp.tilt)
+                .bearing(bearing).padding(0.0, topPad(), 0.0, 0.0).build()))
         }
         val dLat = (target.latitude - np.latitude) * 111_320
         val dLon = (target.longitude - np.longitude) * 111_320 * kotlin.math.cos(Math.toRadians(np.latitude))
