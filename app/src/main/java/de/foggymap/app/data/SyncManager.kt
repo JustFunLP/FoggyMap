@@ -56,8 +56,16 @@ class SyncManager(private val context: Context, private val db: RevealDatabase, 
     private var scheduled: Job? = null
     private val json = "application/json; charset=utf-8".toMediaType()
 
-    val server: String get() = prefs.server.ifEmpty { BuildConfig.DEFAULT_SERVER }
-    val configured get() = validServer(server) && prefs.groupCode.isNotEmpty()
+    /** Own https server if one is set, otherwise the public Nostr relays (no setup needed). */
+    val server: String get() = prefs.server.ifEmpty { BuildConfig.DEFAULT_SERVER }.ifEmpty { Invite.NOSTR }
+    val usesNostr get() = server == Invite.NOSTR
+    val configured get() = prefs.groupCode.isNotEmpty() && (usesNostr || validServer(server))
+
+    private val relays by lazy { NostrRelays(NostrRelays.DEFAULT, "FoggyMap/${BuildConfig.VERSION_NAME} (Android; https://github.com/JustFunLP/FoggyMap)") }
+    @Volatile private var nostrGroup: NostrGroupSync? = null
+    /** The group key derivation is deliberately slow (PBKDF2) – keep it per group. */
+    private fun nostr(code: String = prefs.groupCode): NostrGroupSync =
+        nostrGroup?.takeIf { it.code == code } ?: NostrGroupSync(relays, prefs.nostrSecret(), code).also { if (code == prefs.groupCode) nostrGroup = it }
 
     /** HTTPS only. Debug builds additionally accept the emulator host (automated end-to-end test). */
     private fun validServer(url: String) = Invite.isValidServer(url) ||
@@ -84,12 +92,15 @@ class SyncManager(private val context: Context, private val db: RevealDatabase, 
     /** Debounced sync – many reveals in a row cause one upload. */
     fun requestSync(delayMs: Long = 20_000) {
         if (!configured) return
+        // Relays: bundle more (every sync re-sends the newest package to several relays).
+        val wait = if (usesNostr && delayMs >= 20_000) 120_000 else delayMs
         scheduled?.cancel()
-        scheduled = App.scope.launch { delay(delayMs); syncNow() }
+        scheduled = App.scope.launch { delay(wait); syncNow() }
     }
 
     suspend fun syncNow(): Boolean = withContext(Dispatchers.IO) {
         if (!configured) return@withContext false
+        if (usesNostr) return@withContext mutex.withLock { syncNostr() }
         mutex.withLock {
             state.update { it.copy(status = SyncUi.Status.SYNCING, pendingUploads = db.unsyncedCount()) }
             try {
@@ -170,6 +181,14 @@ class SyncManager(private val context: Context, private val db: RevealDatabase, 
     }
 
     suspend fun createGroup(name: String, serverUrl: String?): Result<String> = withContext(Dispatchers.IO) {
+        if (serverUrl.isNullOrBlank() && usesNostr) {
+            // No server needed: the code is made here, the group lives on the relays.
+            val code = Invite.newCode()
+            enterGroup(code, name.trim().ifEmpty { "FoggyMap-Gruppe" })
+            android.util.Log.i("FoggyMap", "group created $code (nostr)")
+            syncNow()
+            return@withContext Result.success(code)
+        }
         try {
             serverUrl?.let { if (it.isNotBlank()) prefs.server = it }
             if (!validServer(server)) return@withContext Result.failure(SyncError("Bitte eine gültige https://-Serveradresse eintragen."))
@@ -186,6 +205,16 @@ class SyncManager(private val context: Context, private val db: RevealDatabase, 
 
     suspend fun joinGroup(input: String, serverUrl: String?): Result<String> = withContext(Dispatchers.IO) {
         val parsed = Invite.parse(input) ?: return@withContext Result.failure(SyncError("Kein gültiger Gruppencode (12 Zeichen, z. B. A7K9-P3QX-M2TF)."))
+        if (parsed.server == Invite.NOSTR || (parsed.server == null && serverUrl.isNullOrBlank() && usesNostr)) {
+            val found = try { nostr(parsed.code).findGroup() } catch (e: IOException) {
+                return@withContext Result.failure(SyncError("Keine Internetverbindung zu den Koop-Relays. Bitte später erneut versuchen."))
+            } ?: return@withContext Result.failure(SyncError("Keine Gruppe mit diesem Code gefunden. Bitte den Code prüfen – " +
+                "der Ersteller muss die App nach dem Erstellen einmal mit Internet geöffnet haben."))
+            if (prefs.server.isNotEmpty() || BuildConfig.DEFAULT_SERVER.isNotEmpty()) prefs.server = Invite.NOSTR
+            enterGroup(parsed.code, found.groupName.ifEmpty { "FoggyMap-Gruppe" })
+            syncNow()
+            return@withContext Result.success(parsed.code)
+        }
         val target = (parsed.server ?: serverUrl?.takeIf { it.isNotBlank() } ?: server).trimEnd('/')
         if (!validServer(target)) return@withContext Result.failure(SyncError("Keine gültige https://-Serveradresse. Füge die komplette Einladung ein."))
         try {
@@ -211,6 +240,8 @@ class SyncManager(private val context: Context, private val db: RevealDatabase, 
         prefs.groupName = name
         if (changed) {
             prefs.syncRevision = 0
+            prefs.nostrSince = 0; prefs.nostrPublished = HashMap(); prefs.nostrMetaHash = ""
+            nostrGroup = null
             db.markAllUnsynced()        // bring own progress into the new group
         }
         refreshState()
@@ -220,12 +251,14 @@ class SyncManager(private val context: Context, private val db: RevealDatabase, 
         val wasSharing = prefs.shareLiveLocation
         if (wasSharing) App.scope.launch { clearLive() }
         prefs.groupCode = ""; prefs.groupName = ""; prefs.syncRevision = 0; prefs.shareLiveLocation = false
+        prefs.nostrSince = 0; prefs.nostrPublished = HashMap(); prefs.nostrMetaHash = ""
         state.value = SyncUi(server = server)
         refreshState()
     }
 
     suspend fun pushLive(lat: Double, lon: Double) = withContext(Dispatchers.IO) {
         if (!configured || !prefs.shareLiveLocation) return@withContext
+        if (usesNostr) { runCatching { nostr().pushLive(lat, lon, true) }; return@withContext }
         try {
             val body = JSONObject().put("member", member()).put("lat", lat).put("lon", lon)
             call(Request.Builder().url("$server/v2/groups/${prefs.groupCode}/live").put(body.toString().toRequestBody(json)).build())
@@ -233,8 +266,53 @@ class SyncManager(private val context: Context, private val db: RevealDatabase, 
     }
 
     suspend fun clearLive() = withContext(Dispatchers.IO) {
+        if (usesNostr && prefs.groupCode.isNotEmpty()) { runCatching { nostr().pushLive(0.0, 0.0, false) }; return@withContext }
         if (!validServer(server) || prefs.groupCode.isEmpty()) return@withContext
         try { call(Request.Builder().url("$server/v2/groups/${prefs.groupCode}/live?member=${prefs.memberId}").delete().build()) } catch (_: IOException) { }
+    }
+
+    /** One round over the Nostr relays (see [NostrGroupSync]). */
+    private suspend fun syncNostr(): Boolean {
+        state.update { it.copy(status = SyncUi.Status.SYNCING, pendingUploads = db.unsyncedCount()) }
+        return try {
+            val g = nostr()
+            val store = object : NostrGroupSync.Store {
+                override fun ownItems() = db.ownItems()
+                override fun insertFromMember(member: String, items: List<RevealItem>) = db.insert(items, "n:$member", synced = true)
+                override fun markSynced(ids: Collection<String>) = db.markSynced(ids)
+            }
+            val c = db.counts()
+            val meta = NostrGroupSync.Meta(prefs.nickname, prefs.groupName, c.ownRoads, Math.round(c.ownRoadKm * 10) / 10.0)
+            val metaHash = meta.toString()
+            val now = System.currentTimeMillis()
+            // The member card is only re-sent when it changed or every 6 hours.
+            val sendMeta = metaHash != prefs.nostrMetaHash || now - prefs.nostrMetaAt > 6 * 3600_000L
+            val published = prefs.nostrPublished
+            val r = g.sync(store, published, prefs.nostrSince, if (sendMeta) meta else null)
+            prefs.nostrPublished = published
+            if (sendMeta) { prefs.nostrMetaHash = metaHash; prefs.nostrMetaAt = now }
+            prefs.nostrSince = r.newest
+            if (r.relaysOk == 0) throw IOException("Keine Verbindung zu den Koop-Relays")
+            if (r.received.isNotEmpty()) App.notifyDbChanged(remoteRoads = r.received.filter { it.id.startsWith("r:") }.map { it.id })
+            val me = g.myPubkey
+            val members = r.members.map { m ->
+                GroupMember(m.pubkey, m.name, m.roads, m.km, m.lastSeen * 1000, m.live, m.pubkey == me)
+            }.let { list -> if (list.any { it.isMe }) list else list + GroupMember(me, prefs.nickname, c.ownRoads, c.ownRoadKm, now, null, true) }
+            if (prefs.groupName.isEmpty()) r.members.map { it.groupName }.firstOrNull { it.isNotEmpty() }?.let { prefs.groupName = it }
+            prefs.lastSyncMs = now
+            android.util.Log.i("FoggyMap", "nostr sync: published ${r.published}, received ${r.received.size}, ${members.size} members, ${r.relaysOk} relay answers")
+            state.update { it.copy(status = SyncUi.Status.OK, message = "verschlüsselt über ${minOf(r.relaysOk, relays.urls.size)} Relays",
+                lastSync = now, members = members, groupName = prefs.groupName,
+                groupRoads = members.sumOf { it.roads }, groupKm = members.sumOf { it.km }, pendingUploads = db.unsyncedCount()) }
+            true
+        } catch (e: IOException) {
+            state.update { it.copy(status = SyncUi.Status.OFFLINE, message = "Offline – wird automatisch nachgeholt", pendingUploads = db.unsyncedCount()) }
+            false
+        } catch (e: Exception) {
+            android.util.Log.w("FoggyMap", "nostr sync failed", e)
+            state.update { it.copy(status = SyncUi.Status.ERROR, message = e.message ?: e.javaClass.simpleName) }
+            false
+        }
     }
 
     private fun member() = JSONObject().put("id", prefs.memberId).put("name", prefs.nickname)

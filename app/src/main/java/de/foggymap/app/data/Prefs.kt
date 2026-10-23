@@ -48,6 +48,33 @@ class Prefs(context: Context) {
         get() = p.getBoolean("perspective", true)
         set(v) = p.edit().putBoolean("perspective", v).apply()
 
+    // ------------------------------------------------------------ koop over Nostr relays
+
+    /** Signing key of this phone for the Nostr relays (random, stays on the phone). */
+    fun nostrSecret(): ByteArray {
+        val hex = p.getString("nostr_secret", null)
+        if (hex != null && hex.length == 64) return hex.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val k = de.foggymap.app.core.Schnorr.newSecretKey()
+        p.edit().putString("nostr_secret", k.joinToString("") { "%02x".format(it) }).apply()
+        return k
+    }
+    var nostrSince: Long
+        get() = p.getLong("nostr_since", 0)
+        set(v) = p.edit().putLong("nostr_since", v).apply()
+    /** Chunk index → hash of what is already on the relays. */
+    var nostrPublished: MutableMap<Int, String>
+        get() = try {
+            val o = org.json.JSONObject(p.getString("nostr_published", "{}")!!)
+            o.keys().asSequence().associate { it.toInt() to o.getString(it) }.toMutableMap()
+        } catch (_: Exception) { HashMap() }
+        set(v) = p.edit().putString("nostr_published", org.json.JSONObject(v.mapKeys { it.key.toString() }).toString()).apply()
+    var nostrMetaAt: Long
+        get() = p.getLong("nostr_meta_at", 0)
+        set(v) = p.edit().putLong("nostr_meta_at", v).apply()
+    var nostrMetaHash: String
+        get() = p.getString("nostr_meta_hash", "") ?: ""
+        set(v) = p.edit().putString("nostr_meta_hash", v).apply()
+
     // ------------------------------------------------------------ what gets revealed
 
     var revealMode: de.foggymap.app.core.RevealMode

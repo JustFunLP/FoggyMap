@@ -199,7 +199,6 @@ internal fun CoopTab(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> U
     var joinText by remember { mutableStateOf(pendingInvite ?: "") }
     var groupName by remember { mutableStateOf("") }
     var nickname by remember { mutableStateOf(App.prefs.nickname) }
-    var serverField by remember { mutableStateOf(App.prefs.server) }
     var confirmLive by remember { mutableStateOf(false) }
     var confirmLeave by remember { mutableStateOf(false) }
     var shareLive by remember { mutableStateOf(App.prefs.shareLiveLocation) }
@@ -212,14 +211,9 @@ internal fun CoopTab(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> U
         if (!sync.inGroup) {
             OutlinedTextField(nickname, { nickname = it.take(24) }, label = { Text("Dein Anzeigename in der Gruppe") }, singleLine = true,
                 colors = fogTextFieldColors(), modifier = Modifier.fillMaxWidth())
-            if (BuildConfig.DEFAULT_SERVER.isEmpty() || serverField.isNotEmpty()) {
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(serverField, { serverField = it.trim() }, label = { Text("Server-Adresse (https://…)") }, singleLine = true,
-                    colors = fogTextFieldColors(), modifier = Modifier.fillMaxWidth(),
-                    supportingText = { Text(if (BuildConfig.DEFAULT_SERVER.isEmpty())
-                        "Einmalig nötig für den Gruppenersteller – siehe Anleitung „Koop-Server“. Beim Beitreten per Einladung wird sie automatisch übernommen."
-                        else "Leer lassen für den eingebauten Server.", color = Fog.Muted, fontSize = 11.sp) })
-            }
+            Spacer(Modifier.height(10.dp))
+            InfoBox("Kein Server nötig: Gruppe erstellen, Einladung teilen, fertig. Die Funde laufen verschlüsselt über öffentliche Nostr-Relays.",
+                painterResource(R.drawable.ic_shield), Fog.Success)
             SectionTitle("Neue Gruppe")
             OutlinedTextField(groupName, { groupName = it.take(24) }, label = { Text("Gruppenname (z. B. Büro)") }, singleLine = true,
                 colors = fogTextFieldColors(), modifier = Modifier.fillMaxWidth())
@@ -228,7 +222,7 @@ internal fun CoopTab(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> U
                 App.prefs.nickname = nickname
                 busy = true; error = null
                 scope.launch {
-                    App.sync.createGroup(groupName, serverField).onFailure { error = it.message }
+                    App.sync.createGroup(groupName, null).onFailure { error = it.message }
                     busy = false
                 }
             }
@@ -244,7 +238,7 @@ internal fun CoopTab(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> U
                     App.prefs.nickname = nickname
                     busy = true; error = null
                     scope.launch {
-                        App.sync.joinGroup(joinText, serverField).onFailure { error = it.message }
+                        App.sync.joinGroup(joinText, null).onFailure { error = it.message }
                         busy = false
                     }
                 }
@@ -270,7 +264,7 @@ internal fun CoopTab(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> U
                     }
                 }
                 Spacer(Modifier.height(8.dp))
-                Text("Teile diese Einladung mit deinen Freunden. Sie installieren dieselbe FoggyMap-APK und fügen die Nachricht unter „Beitreten“ ein.",
+                Text("Teile diese Einladung mit deinen Freunden. Darin steht der Download-Link der App und der Code zum Beitreten.",
                     color = Fog.Muted, fontSize = 12.sp, lineHeight = 16.sp)
                 TextButton(onClick = { clipboard.setText(AnnotatedString(Invite.shareText(sync.groupName, sync.groupCode, sync.server))) }) {
                     Text("Einladung kopieren", color = Fog.Violet2)
@@ -311,8 +305,11 @@ internal fun CoopTab(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> U
         }
         SectionTitle("Was wird geteilt?")
         InfoBox("Geteilt werden nur die aufgedeckten Flächen (Straßenabschnitte, Häuserblöcke, Gebäude), deine Kilometer und dein Anzeigename. " +
-            "Dein GPS-Verlauf wird nie übertragen. Hinweis: Aus den aufgedeckten Flächen ist erkennbar, wo du unterwegs warst. " +
-            "Wer den Gruppencode kennt, kann beitreten – teile ihn nur mit Menschen, denen du vertraust.",
+            "Dein GPS-Verlauf wird nie übertragen. " +
+            (if (sync.server == Invite.NOSTR || sync.server.isEmpty()) "Ohne eigenen Server laufen die Daten über mehrere öffentliche Nostr-Relays, " +
+                "verschlüsselt mit eurem Gruppencode – die Relays sehen nur unlesbare Pakete. " else "") +
+            "Aus den aufgedeckten Flächen ist erkennbar, wo du unterwegs warst: Wer den Gruppencode kennt, kann beitreten und alles sehen – " +
+            "teile ihn nur mit Menschen, denen du vertraust.",
             rememberVectorPainter(Icons.Filled.Lock))
     }
 

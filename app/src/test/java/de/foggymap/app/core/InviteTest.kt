@@ -32,4 +32,18 @@ class InviteTest {
         assertFalse(Invite.isValidServer("http://a.b.workers.dev"))
         assertFalse(Invite.isValidServer("https://a.b/\"><script>"))
     }
+
+    @Test fun groupsWithoutServerUseNostr() {
+        val code = Invite.newCode()
+        assertEquals(code, Invite.normalizeCode(code))
+        val text = Invite.shareText("Büro", code, Invite.NOSTR)
+        assertTrue(text.contains("foggymap:nostr#$code"))
+        val p = Invite.parse(text)!!
+        assertEquals(code, p.code)
+        assertEquals(Invite.NOSTR, p.server)
+        // Without the last line (messenger cut it off) the code alone still works; the download link is no server.
+        val cut = Invite.parse(text.lines().filter { !it.startsWith("foggymap:") }.joinToString("\n"))!!
+        assertEquals(code, cut.code)
+        assertNull(cut.server)
+    }
 }

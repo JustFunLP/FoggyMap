@@ -368,6 +368,7 @@ private fun AppTab(onDataCleared: () -> Unit) {
 
     SectionTitle("Koop-Server")
     if (!showServer) {
+        Text("Ohne Eintrag läuft Koop ohne Einrichtung über öffentliche Nostr-Relays (verschlüsselt).", color = Fog.Muted, fontSize = 12.sp)
         TextButton(onClick = { showServer = true }) { Text("Eigenen Server eintragen (für Fortgeschrittene)", color = Fog.Violet2) }
     } else {
         OutlinedTextField(server, { server = it.trim() }, label = { Text("Eigene Server-Adresse (optional)") }, singleLine = true,

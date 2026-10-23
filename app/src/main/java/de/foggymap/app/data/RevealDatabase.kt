@@ -109,6 +109,15 @@ class RevealDatabase(context: Context) : SQLiteOpenHelper(context, "foggymap.db"
         return out
     }
 
+    /** Own reveals in the order they were made (for the Nostr chunks – append-only order). */
+    fun ownItems(): List<RevealItem> {
+        val out = ArrayList<RevealItem>()
+        readableDatabase.rawQuery("SELECT data FROM reveal WHERE owner = ? ORDER BY seq", arrayOf(OWNER_ME)).use { c ->
+            while (c.moveToNext()) RevealItem.fromJson(JSONObject(c.getString(0)))?.let(out::add)
+        }
+        return out
+    }
+
     fun unsynced(limit: Int): List<RevealItem> {
         val out = ArrayList<RevealItem>()
         readableDatabase.rawQuery("SELECT data FROM reveal WHERE synced = 0 ORDER BY seq LIMIT ?", arrayOf(limit.toString())).use { c ->
