@@ -71,6 +71,7 @@ class UiScreenshotTest {
     @Test fun menuApp() = shot("menu-app") { Sheet { MenuContent(SyncUi(), null, {}, MenuTab.APP, {}, {}) } }
 
     @Test fun menuInfo() {
+        de.foggymap.app.App.badges.earned.value = listOf(de.foggymap.app.core.Badges.CATALOG[0])
         de.foggymap.app.App.tracking.value = TrackingUi(active = true, accuracy = 6f, mode = TravelMode.WALK, sessionSegments = 7,
             sessionMeters = 1840.0, powerProfile = "GPS gedrosselt (kurzer Halt)")
         shot("menu-info") { Sheet { MenuContent(group, null, {}, MenuTab.INFO, {}, {}) } }
@@ -97,6 +98,33 @@ class UiScreenshotTest {
     fun hudStartNarrow() = shot("hud-start-schmal") {
         Box(Modifier.fillMaxSize().background(mapBackground())) {
             MapControls(TrackingUi(), 0, mapBearing = 0f, northUp = false, tilted = true, following = true, {}, {}, {}, {}, {})
+        }
+    }
+
+    /** All walking-figure frames and the two cones on one sheet. */
+    @Test fun figureSheet() {
+        val imgs = Figures.all(2)
+        val w = 64; val h = 96
+        val cols = Figures.FRAMES + 1
+        val rows = 2 * Figures.View.entries.size + 1
+        val sheet = Bitmap.createBitmap(cols * w, rows * h, Bitmap.Config.ARGB_8888)
+        val c = android.graphics.Canvas(sheet)
+        c.drawColor(0xFF14162C.toInt())
+        var r = 0
+        for (scheme in listOf(Figures.ME, Figures.FRIEND)) for (v in Figures.View.entries) {
+            for (f in -1 until Figures.FRAMES) imgs[Figures.imageName(scheme, v, f)]?.let { c.drawBitmap(it, ((f + 1) * w).toFloat(), (r * h).toFloat(), null) }
+            r++
+        }
+        imgs[Figures.coneName(Figures.ME)]?.let { c.drawBitmap(it, 0f, (r * h).toFloat(), null) }
+        imgs[Figures.coneName(Figures.FRIEND)]?.let { c.drawBitmap(it, 160f, (r * h).toFloat(), null) }
+        val dir = File("build/screenshots").apply { mkdirs() }
+        FileOutputStream(File(dir, "figuren.png")).use { sheet.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    @Test @Config(qualifiers = "w400dp-h860dp-xhdpi")
+    fun badgeCelebration() = shot("abzeichen") {
+        Box(Modifier.fillMaxSize().background(mapBackground())) {
+            BadgeCelebration(de.foggymap.app.core.Badges.CATALOG[0], static = true) {}
         }
     }
 }

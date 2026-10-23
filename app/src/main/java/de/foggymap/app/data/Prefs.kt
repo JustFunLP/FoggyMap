@@ -21,6 +21,22 @@ class Prefs(context: Context) {
         get() = p.getString("rest_spots", "") ?: ""
         set(v) = p.edit().putString("rest_spots", v).apply()
 
+    /** Badges this player has (ids) and the ones already celebrated with the big animation. */
+    var badgesEarned: Set<String>
+        get() = p.getStringSet("badges_earned", emptySet())?.toSet() ?: emptySet()
+        set(v) = p.edit().putStringSet("badges_earned", v).apply()
+    var badgesCelebrated: Set<String>
+        get() = p.getStringSet("badges_celebrated", emptySet())?.toSet() ?: emptySet()
+        set(v) = p.edit().putStringSet("badges_celebrated", v).apply()
+    /** Badges the admin defined in the app (JSON array cache). */
+    var badgeDefs: String
+        get() = p.getString("badge_defs", "[]") ?: "[]"
+        set(v) = p.edit().putString("badge_defs", v).apply()
+    /** Only on the admin's phone, after entering the admin code: the key that signs awards. */
+    var adminSecret: String
+        get() = p.getString("admin_secret", "") ?: ""
+        set(v) = p.edit().putString("admin_secret", v).apply()
+
     /** Map with north up instead of your viewing direction (compass button). */
     var northUp: Boolean
         get() = p.getBoolean("north_up", false)

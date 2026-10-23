@@ -58,6 +58,7 @@ object App {
     lateinit var sync: SyncManager; private set
     lateinit var updater: Updater; private set
     lateinit var live: de.foggymap.app.data.LiveLink; private set
+    lateinit var badges: de.foggymap.app.data.BadgeRepository; private set
 
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -92,6 +93,7 @@ object App {
         sync = SyncManager(app, db, prefs)
         updater = Updater(app)
         live = de.foggymap.app.data.LiveLink(sync, db, prefs)
+        badges = de.foggymap.app.data.BadgeRepository(app, prefs)
         sync.init()
         de.foggymap.app.data.UpdateCheckWorker.schedule(app)
         scope.launch { refreshCoverage() }

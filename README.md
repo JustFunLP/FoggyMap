@@ -58,6 +58,13 @@ scripts/       Emulator-End-to-End-Test (simulierte GPS-Route)
 - **Optional: eigener Server** (Cloudflare Worker + D1 oder Node.js + SQLite, siehe ANLEITUNG Abschnitt 4). Dann gilt: 12-stellige Gruppencodes, Ratenbegrenzung, Eingabeprüfung, Größenlimits und nur HTTPS. Mitglieds-IDs werden gehasht.
 - Geteilt werden nur aufgedeckte Flächen, Kilometerstände und der Anzeigename. Der **Live-Standort ist standardmäßig aus**. Er wird nur nach ausdrücklicher Bestätigung übertragen und verfällt nach 10 Minuten.
 
+## Abzeichen
+
+- Ein Abzeichen wird durch ein öffentliches, vom Admin signiertes Nostr-Ereignis vergeben (Kind 30078, `#t fm-badges`, ersetzbar je Abzeichen und Empfänger, also auch zurücknehmbar). Ziele: *alle Installationen bis Zeitpunkt T* (`firstInstallTime`), *Spieler-ID* (40 Bit des eigenen Geräte-Schlüssels, `XXXX-XXXX`) oder ein *Gruppenmitglied* (Schlüssel).
+- Die App enthält nur den öffentlichen Admin-Schlüssel (`Badges.ISSUER`) und prüft jede Signatur. Der private Schlüssel entsteht per PBKDF2 (120 000 Runden) aus dem Admin-Code, der nur beim Admin liegt.
+- Neue Abzeichen kann der Admin in der App anlegen (Name, Text, Symbol, Farbe). Die eingebauten (z. B. „Alpha Tester“) haben eigenes Design.
+- Beim App-Start werden neue Abzeichen abgeholt. Jedes erscheint einmal mit einer großen Animation: Lichtstrahlen, die Medaille dreht sich herein, Konfetti, Glanz und ein kurzes Vibrieren.
+
 ## Akku
 
 | Maßnahme | Wirkung |

@@ -51,6 +51,8 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         // Resume an exploration that was running when the app/process was closed.
         if (App.prefs.trackingWanted && !App.tracking.value.active && hasFineLocation(this)) TrackingService.start(this)
+        // New badges? (the big animation follows when there is one)
+        App.scope.launch { App.badges.refresh() }
     }
 
     private fun handleIntent(intent: Intent?) {

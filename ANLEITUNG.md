@@ -50,10 +50,21 @@ Es muss **nichts eingerichtet** werden: kein Server, kein Konto, kein GitHub. Al
 3. **Freund/Kollege:** installiert die App über den Link in der Nachricht (wie in Abschnitt 1, ohne GitHub-Konto) → App öffnen → **Menü → Koop** → die Einladungsnachricht in das Feld *„Einladung einfügen“* kopieren (oder in WhatsApp lange auf die Nachricht tippen → **Teilen → FoggyMap**) → **Beitreten**.
 4. Ab jetzt sehen alle, was jeder aufdeckt. Synchronisiert wird automatisch alle 2–3 Minuten während der Erkundung, beim Öffnen der App und sobald wieder Internet da ist. Von Hand: **Menü → Koop** → das Sync-Symbol rechts neben dem Status.
 
+**Auf der Karte** bist du eine kleine violette Figur, deine Freunde sind türkis, mit Namen darunter. Wer unterwegs ist, läuft auf der Stelle. Der Lichtkegel am Boden zeigt die Blickrichtung. Mit eingeschaltetem Live-Standort bewegen sich die Figuren alle 2–3 Sekunden, und ihr seht den Nebel beim anderen fast sofort verschwinden.
+
 **Wie funktioniert das ohne Server?** Die Funde laufen über mehrere öffentliche **Nostr-Relays** (frei nutzbare Nachrichten-Server, die jeder verwenden darf). Alles ist mit eurem Gruppencode **verschlüsselt** (AES-256). Die Relays sehen nur unlesbare Pakete, keine Namen, keine Orte. Die App schreibt gleichzeitig an fünf Relays, damit nichts verloren geht, wenn eines ausfällt. Deine eigenen Funde bleiben ohnehin immer auf deinem Handy.
 
 **Was wird geteilt?** Nur aufgedeckte Flächen, Kilometerzahlen und der Anzeigename. Der GPS-Verlauf wird nie übertragen. Den Live-Standort sehen andere nur, wenn du ihn in *Menü → Koop → Live-Standort* ausdrücklich einschaltest. Dann sehen sie dich während der Erkundung alle 2–3 Sekunden, inklusive dem, was du gerade aufdeckst (kostet etwas mehr Akku). Nach dem Ausschalten oder Beenden verschwindet deine Position.
 Aus den aufgedeckten Flächen ist erkennbar, wo du unterwegs warst. Gib den Gruppencode deshalb nur Leuten, die das sehen dürfen. Wer den Code kennt, kann beitreten und alles sehen.
+
+**Abzeichen:** Bekommst du ein neues Abzeichen (z. B. „Alpha Tester“), erscheint es beim nächsten App-Start mit einer großen Einblendung. Deine Abzeichen und deine Spieler-ID stehen unter Menü → Info.
+
+*Für den Admin:* Menü → App → ganz unten **„Admin“** → Admin-Code eingeben. Danach kannst du dort Abzeichen verleihen:
+- **an alle, die die App bis jetzt installiert haben** (z. B. Alpha Tester),
+- **per Spieler-ID** (die ID steht beim Empfänger unter Menü → Info),
+- **an ein Mitglied deiner Gruppe**.
+
+Du kannst Abzeichen auch wieder zurücknehmen oder neue anlegen (Name, Beschreibung, Symbol, Farbe). Der Admin-Code steht nicht in der App: Wer ihn nicht kennt, kann keine Abzeichen vergeben.
 
 ---
 

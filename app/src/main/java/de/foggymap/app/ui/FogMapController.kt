@@ -49,6 +49,11 @@ import org.maplibre.android.style.layers.PropertyFactory.circleColor
 import org.maplibre.android.style.layers.PropertyFactory.circleOpacity
 import org.maplibre.android.style.layers.PropertyFactory.circlePitchAlignment
 import org.maplibre.android.style.layers.PropertyFactory.iconAllowOverlap
+import org.maplibre.android.style.layers.PropertyFactory.iconAnchor
+import org.maplibre.android.style.layers.PropertyFactory.circleStrokeOpacity
+import org.maplibre.android.style.layers.PropertyFactory.textAnchor
+import org.maplibre.android.style.layers.PropertyFactory.textAllowOverlap
+import org.maplibre.android.style.layers.PropertyFactory.textIgnorePlacement
 import org.maplibre.android.style.layers.PropertyFactory.iconIgnorePlacement
 import org.maplibre.android.style.layers.PropertyFactory.iconImage
 import org.maplibre.android.style.layers.PropertyFactory.iconPitchAlignment
@@ -159,11 +164,18 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         add(FillLayer(L_DISSOLVE, SRC_FLASH).withProperties(fillColor(FOG), fillOpacity(0f)))
         add(FillLayer(L_DISSOLVE_CLOUDS, SRC_FLASH).withProperties(fillPattern(IMG_CLOUDS), fillOpacity(0f)))
         add(LineLayer(L_FLASH, SRC_FLASH).withProperties(lineColor(LAVENDER), lineOpacity(0f), lineBlur(4f), lineWidth(2f)))
-        // Group members who share their live position.
-        add(CircleLayer(L_FRIENDS, SRC_FRIENDS).withProperties(circleRadius(7f), circleColor(CYAN),
-            circleStrokeColor("#0B0D1A"), circleStrokeWidth(2.5f), circleBlur(0.1f)))
+        // Group members who share their live position: a walking figure, its viewing cone and the name.
+        val pr = context.resources.displayMetrics.density.toInt().coerceIn(1, 4)
+        for ((name, bmp) in Figures.all(pr)) style.addImage(name, bmp)
+        add(SymbolLayer(L_FRIENDS_CONE, SRC_FRIENDS).withProperties(iconImage(Figures.coneName(Figures.FRIEND)), iconRotate(get("b")),
+            iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP), iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_MAP),
+            iconAllowOverlap(true), iconIgnorePlacement(true)).also { it.setFilter(Expression.has("b")) })
+        add(SymbolLayer(L_FRIENDS, SRC_FRIENDS).withProperties(iconImage(get("img")), iconAnchor(Property.ICON_ANCHOR_BOTTOM),
+            iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_VIEWPORT), iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_VIEWPORT),
+            iconAllowOverlap(true), iconIgnorePlacement(true)))
         add(SymbolLayer(L_FRIENDS_LABEL, SRC_FRIENDS).withProperties(textField(get("name")), textFont(arrayOf("Noto Sans Bold")),
-            textSize(12f), textColor("#E0FBFF"), textHaloColor("#0B0D1A"), textHaloWidth(1.6f), textOffset(arrayOf(0f, 1.4f))))
+            textSize(12f), textColor("#E0FBFF"), textHaloColor("#0B0D1A"), textHaloWidth(1.6f), textAnchor(Property.TEXT_ANCHOR_TOP),
+            textOffset(arrayOf(0f, 0.5f)), textAllowOverlap(true), textIgnorePlacement(true)))
         setBuildingsVisible(App.prefs.buildings3d)
         installPuck()
         scope.launch { for (hint in pending) runCatching { refresh(hint) }.onFailure { android.util.Log.e(TAG, "fog refresh failed", it) } }
@@ -274,6 +286,8 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
 
     /** Slow "breathing" of the fog rim. Stopped while the app is in the background. */
     fun startAmbient() {
+        visible = true
+        ensureTicker()
         if (!animationsEnabled || breathing != null) return
         val glow = style.getLayer(L_EDGE_GLOW) ?: return
         var lastValue = -1f
@@ -290,18 +304,70 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         }
     }
 
-    fun stopAmbient() { breathing?.cancel(); breathing = null }
+    fun stopAmbient() { breathing?.cancel(); breathing = null; visible = false; handler.removeCallbacks(ticker) }
+
+    // ------------------------------------------------------------------ walking figures
+    //
+    // You and your friends are little mannequins that walk on the spot while moving (8 frames, ~8 fps,
+    // only while the map is on screen) and stand still otherwise. Side, back or front view follows the
+    // walking direction relative to the screen.
+
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var visible = false
+    private var walkFrame = 0
+    private val ticker = Runnable { tick() }
+    private class Friend(val key: String, val name: String, val pos: LatLon, val heading: Double?, val speed: Double?, val atMs: Long)
+    private var friends: List<Friend> = emptyList()
+    private var lastFriendsJson = ""
+
+    private fun meWalking(): Boolean {
+        val l = lastLoc ?: return false
+        return l.hasSpeed() && l.speed > 0.6f && System.currentTimeMillis() - l.time < 8_000
+    }
+    private fun friendWalking(f: Friend) = (f.speed ?: 0.0) > 0.6 && System.currentTimeMillis() - f.atMs < 8_000
+
+    private fun ensureTicker() {
+        if (!visible || !animationsEnabled || disposed) return
+        if (meWalking() || friends.any { friendWalking(it) }) { handler.removeCallbacks(ticker); handler.postDelayed(ticker, 125) }
+    }
+
+    private fun tick() {
+        if (!visible || disposed) return
+        walkFrame = (walkFrame + 1) % Figures.FRAMES
+        refreshFigures()
+        ensureTicker()
+    }
+
+    private fun refreshFigures() {
+        puckPos?.let { setPuck(it, puckBearing) }
+        renderFriends()
+    }
+
+    private fun renderFriends() {
+        val cam = map.cameraPosition.bearing
+        val features = friends.map { f ->
+            val walking = friendWalking(f) && animationsEnabled
+            val view = Figures.viewFor(f.heading?.let { it - cam })
+            val props = StringBuilder("\"name\":${org.json.JSONObject.quote(f.name)},\"img\":\"${Figures.imageName(Figures.FRIEND, view, if (walking) walkFrame else -1)}\"")
+            f.heading?.let { props.append(",\"b\":").append("%.0f".format(java.util.Locale.ROOT, it)) }
+            FogBuilder.feature(FogBuilder.pointJson(f.pos), props.toString())
+        }
+        val json = FogBuilder.featureCollection(features)
+        if (json == lastFriendsJson) return
+        lastFriendsJson = json
+        source(SRC_FRIENDS)?.setGeoJson(json)
+    }
 
     /** Group members on the map: the live channel (every 2–3 s) wins over the slower member cards. */
     fun showFriends(members: List<GroupMember>, live: Map<String, de.foggymap.app.data.LiveFriend>) {
         val now = System.currentTimeMillis()
-        val pos = LinkedHashMap<String, Pair<String, LatLon>>()
-        members.filter { !it.isMe && it.live != null }.forEach { pos[it.key] = it.name to it.live!! }
-        live.values.filter { now - it.atMs < de.foggymap.app.data.LiveLink.STALE_MS }.forEach { pos[it.key] = it.name to it.pos }
-        val features = pos.values.map { (name, p) ->
-            FogBuilder.feature(FogBuilder.pointJson(p), "\"name\":${org.json.JSONObject.quote(name)}")
-        }
-        source(SRC_FRIENDS)?.setGeoJson(FogBuilder.featureCollection(features))
+        val byKey = LinkedHashMap<String, Friend>()
+        members.filter { !it.isMe && it.live != null }.forEach { byKey[it.key] = Friend(it.key, it.name, it.live!!, null, null, 0) }
+        live.values.filter { now - it.atMs < de.foggymap.app.data.LiveLink.STALE_MS }
+            .forEach { byKey[it.key] = Friend(it.key, it.name, it.pos, it.heading, it.speed, it.atMs) }
+        friends = byKey.values.toList()
+        renderFriends()
+        ensureTicker()
     }
 
     // ------------------------------------------------------------------ own location puck & camera
@@ -339,16 +405,18 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
     private val frameCallback = android.view.Choreographer.FrameCallback { onFrame(it) }
 
     private fun installPuck() {
-        val d = androidx.core.content.ContextCompat.getDrawable(context, R.drawable.ic_puck_arrow)!!
-        val px = (44 * context.resources.displayMetrics.density).toInt()
-        style.addImage(IMG_PUCK, d.toBitmap(px, px))
         addSource(SRC_ME, FogBuilder.EMPTY)
-        // Always on top of fog, buildings and labels.
-        style.addLayer(CircleLayer(L_ME_GLOW, SRC_ME).withProperties(circleRadius(26f), circleColor(VIOLET),
-            circleOpacity(0.28f), circleBlur(0.9f), circlePitchAlignment(Property.CIRCLE_PITCH_ALIGNMENT_MAP)))
-        style.addLayer(SymbolLayer(L_ME, SRC_ME).withProperties(iconImage(IMG_PUCK), iconRotate(get("b")),
+        // Always on top of fog, buildings and labels: how exact the position is (only when it is vague),
+        // the viewing cone on the ground, and your figure.
+        style.addLayer(CircleLayer(L_ME_ACC, SRC_ME).withProperties(circleRadius(Expression.raw(ACC_RADIUS)), circleColor(VIOLET),
+            circleOpacity(0.10f), circleStrokeColor(VIOLET), circleStrokeOpacity(0.35f), circleStrokeWidth(1f),
+            circlePitchAlignment(Property.CIRCLE_PITCH_ALIGNMENT_MAP)).also { it.setFilter(Expression.raw("[\">\",[\"get\",\"acc\"],10]")) })
+        style.addLayer(SymbolLayer(L_ME_CONE, SRC_ME).withProperties(iconImage(Figures.coneName(Figures.ME)), iconRotate(get("b")),
             iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP), iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_MAP),
-            iconAllowOverlap(true), iconIgnorePlacement(true), iconSize(1.0f)))
+            iconAllowOverlap(true), iconIgnorePlacement(true)).also { it.setFilter(Expression.has("b")) })
+        style.addLayer(SymbolLayer(L_ME, SRC_ME).withProperties(iconImage(get("img")), iconAnchor(Property.ICON_ANCHOR_BOTTOM),
+            iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_VIEWPORT), iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_VIEWPORT),
+            iconAllowOverlap(true), iconIgnorePlacement(true)))
         map.addOnCameraMoveListener { reportBearing() }
         map.addOnCameraIdleListener { reportBearing() }
         map.addOnCameraMoveStartedListener { reason ->
@@ -380,6 +448,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         if (first) puckPos = t
         updateHeading()
         if (first && follow == Follow.FOLLOW) startFollowing() else kick()
+        ensureTicker()
     }
 
     /** Compass azimuth (true north) from the phone's rotation sensor; null when not available. */
@@ -434,8 +503,16 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
     }
 
     private fun setPuck(p: LatLng, bearing: Double) {
+        val walking = meWalking() && animationsEnabled
+        val view = Figures.viewFor(if (hasBearing) bearing - map.cameraPosition.bearing else null)
+        val acc = lastLoc?.takeIf { it.hasAccuracy() }?.accuracy?.toDouble() ?: 0.0
+        // Accuracy circle radius in screen pixels at zoom 0 (512-px tiles); the layer scales it with the zoom.
+        val r0 = acc / (78271.517 * kotlin.math.cos(Math.toRadians(p.latitude)))
+        val props = StringBuilder("\"img\":\"${Figures.imageName(Figures.ME, view, if (walking) walkFrame else -1)}\"")
+        props.append(",\"acc\":").append(acc.toInt()).append(",\"r0\":").append("%.9f".format(java.util.Locale.ROOT, r0))
+        if (hasBearing) props.append(",\"b\":").append("%.1f".format(java.util.Locale.ROOT, bearing))
         val json = FogBuilder.featureCollection(listOf(
-            FogBuilder.feature(FogBuilder.pointJson(LatLon(p.latitude, p.longitude)), "\"b\":${"%.1f".format(java.util.Locale.ROOT, bearing)}")))
+            FogBuilder.feature(FogBuilder.pointJson(LatLon(p.latitude, p.longitude)), props.toString())))
         if (json == lastPuckJson) return
         lastPuckJson = json
         source(SRC_ME)?.setGeoJson(json)
@@ -496,6 +573,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         if (reportedBearing.isNaN() || kotlin.math.abs(angleDelta(reportedBearing.toDouble(), b.toDouble())) >= 1.0) {
             reportedBearing = b
             onBearingChanged?.invoke(b)
+            refreshFigures()      // side/back/front view depends on the map rotation
         }
     }
 
@@ -563,6 +641,9 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         const val IMG_WINDOWS = "windows"; const val ROOF = "#1a1c38"
         const val L_BLDG_ROOF = "bldg-roof"; const val L_BLDG_NEW_ROOF = "bldg-new-roof"
         const val SRC_TRAIL = "trail"; const val L_TRAIL = "trail"
-        const val IMG_PUCK = "me-arrow"; const val SRC_ME = "me"; const val L_ME = "me-arrow"; const val L_ME_GLOW = "me-glow"
+        const val SRC_ME = "me"; const val L_ME = "me-figure"; const val L_ME_CONE = "me-cone"; const val L_ME_ACC = "me-accuracy"
+        const val L_FRIENDS_CONE = "friends-cone"
+        /** Circle radius from metres: r0 = pixels at zoom 0, doubled per zoom level. */
+        const val ACC_RADIUS = "[\"interpolate\",[\"exponential\",2],[\"zoom\"],0,[\"get\",\"r0\"],22,[\"*\",[\"get\",\"r0\"],4194304]]"
     }
 }

@@ -158,6 +158,8 @@ internal fun InfoTab(sync: SyncUi) {
             "Diese Orte merkt sich nur dein Handy.", color = Fog.Muted, fontSize = 11.sp, lineHeight = 15.sp)
     }
 
+    BadgesSection()
+
     SectionTitle("Aufgedeckt")
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         StatTile("${c.roadKm.de(1)} km", "Straßen erkundet", painterResource(R.drawable.ic_road), Modifier.weight(1f))

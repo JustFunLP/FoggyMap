@@ -380,6 +380,8 @@ private fun AppTab(onDataCleared: () -> Unit) {
     TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.openstreetmap.org/copyright"))) }) {
         Text("OpenStreetMap-Lizenz", color = Fog.Violet2)
     }
+    Text("Spieler-ID: ${App.badges.playerId}", color = Fog.Muted, fontSize = 11.sp)
+    AdminSection()
 
     if (confirmReset) AlertDialog(
         onDismissRequest = { confirmReset = false }, containerColor = Fog.Surface, titleContentColor = Fog.Text, textContentColor = Fog.Text,

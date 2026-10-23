@@ -97,7 +97,10 @@ enum class Sheet { NONE, MENU }
 fun FoggyRoot(activity: MainActivity) {
     var onboarded by remember { mutableStateOf(App.prefs.onboardingDone) }
     if (!onboarded) OnboardingScreen { App.prefs.onboardingDone = true; onboarded = true }
-    else MainScreen(activity)
+    else Box(Modifier.fillMaxSize()) {
+        MainScreen(activity)
+        BadgeCelebrationHost()
+    }
 }
 
 @SuppressLint("MissingPermission")
