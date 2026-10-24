@@ -72,6 +72,8 @@ class UiScreenshotTest {
 
     @Test fun menuInfo() {
         de.foggymap.app.App.badges.earned.value = listOf(de.foggymap.app.core.Badges.CATALOG[0])
+        de.foggymap.app.data.Diagnostics.tour.value = org.json.JSONObject("{\"minutes\":52,\"drainPct\":4.1,\"rate\":4.7," +
+            "\"fixes\":980,\"vague\":12,\"acc50\":5.0,\"acc90\":11.0}")
         de.foggymap.app.App.tracking.value = TrackingUi(active = true, accuracy = 6f, mode = TravelMode.WALK, sessionSegments = 7,
             sessionMeters = 1840.0, powerProfile = "GPS gedrosselt (kurzer Halt)")
         shot("menu-info") { Sheet { MenuContent(group, null, {}, MenuTab.INFO, {}, {}) } }
@@ -126,5 +128,19 @@ class UiScreenshotTest {
         Box(Modifier.fillMaxSize().background(mapBackground())) {
             BadgeCelebration(de.foggymap.app.core.Badges.CATALOG[0], static = true) {}
         }
+    }
+
+    /** The problem report as text, to check it holds no place, name or code. */
+    @Test fun problemReport() {
+        val app = de.foggymap.app.App
+        app.prefs.groupCode = "ABCDEFGHJKMN"
+        try {
+            val report = kotlinx.coroutines.runBlocking {
+                de.foggymap.app.data.Diagnostics.buildReport(compose.activity, "Fenster flackern beim Drehen", true, null)
+            }
+            File("build/screenshots").apply { mkdirs() }.resolve("bericht.txt").writeText(report)
+            org.junit.Assert.assertTrue(report.contains("FoggyMap-Problembericht"))
+            org.junit.Assert.assertFalse("no group code in the report", report.contains("ABCDEFGHJKMN"))
+        } finally { app.prefs.groupCode = "" }
     }
 }

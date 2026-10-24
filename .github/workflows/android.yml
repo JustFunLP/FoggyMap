@@ -105,6 +105,7 @@ jobs:
           if ls app/build/screenshots/*.png >/dev/null 2>&1; then
             gh release view ui-shots >/dev/null 2>&1 || gh release create ui-shots --draft --title "UI-Screenshots (intern)" --notes "Robolectric-Screenshots der Oberfläche"
             gh release upload ui-shots app/build/screenshots/*.png --clobber
+            ls app/build/screenshots/*.txt >/dev/null 2>&1 && gh release upload ui-shots app/build/screenshots/*.txt --clobber || true
           fi
 
       - name: Koop relays (network test, never blocks the build)

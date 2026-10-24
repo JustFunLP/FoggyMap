@@ -87,6 +87,7 @@ object App {
 
     fun init(app: Application) {
         context = app
+        de.foggymap.app.data.Diagnostics.install(app)
         db = RevealDatabase(app)
         prefs = Prefs(app)
         tiles = TileRepository(app)

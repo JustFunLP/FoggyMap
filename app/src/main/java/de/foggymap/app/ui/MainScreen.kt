@@ -100,6 +100,7 @@ fun FoggyRoot(activity: MainActivity) {
     else Box(Modifier.fillMaxSize()) {
         MainScreen(activity)
         BadgeCelebrationHost()
+        CrashPrompt()
     }
 }
 

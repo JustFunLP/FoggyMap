@@ -25,6 +25,9 @@ class LiveLink(private val sync: SyncManager, private val db: RevealDatabase, pr
     val friends = MutableStateFlow<Map<String, LiveFriend>>(emptyMap())
 
     private var link: NostrLive? = null
+    /** Open live connections (for the problem report). */
+    val connectedRelays: Int get() = synchronized(this) { link?.connectedRelays ?: 0 }
+    val active: Boolean get() = synchronized(this) { link != null }
     private var linkCode = ""
     @Volatile private var sending = false
     @Volatile private var listening = false

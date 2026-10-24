@@ -192,7 +192,7 @@ class SyncManager(private val context: Context, private val db: RevealDatabase, 
             // No server needed: the code is made here, the group lives on the relays.
             val code = Invite.newCode()
             enterGroup(code, name.trim().ifEmpty { "FoggyMap-Gruppe" })
-            android.util.Log.i("FoggyMap", "group created $code (nostr)")
+            android.util.Log.i("FoggyMap", "group created (nostr)")
             syncNow()
             return@withContext Result.success(code)
         }
@@ -203,7 +203,7 @@ class SyncManager(private val context: Context, private val db: RevealDatabase, 
             val rsp = call(Request.Builder().url("$server/v2/groups").post(body.toString().toRequestBody(json)).build())
             if (rsp.first != 201) return@withContext Result.failure(SyncError(rsp.second?.optString("error") ?: "Server antwortet ${rsp.first}"))
             val code = rsp.second!!.getString("code")
-            android.util.Log.i("FoggyMap", "group created $code")
+            android.util.Log.i("FoggyMap", "group created")
             enterGroup(code, rsp.second!!.optString("name", name))
             syncNow()
             Result.success(code)

@@ -158,6 +158,8 @@ internal fun InfoTab(sync: SyncUi) {
             "Diese Orte merkt sich nur dein Handy.", color = Fog.Muted, fontSize = 11.sp, lineHeight = 15.sp)
     }
 
+    BatteryGpsCard()
+
     BadgesSection()
 
     SectionTitle("Aufgedeckt")

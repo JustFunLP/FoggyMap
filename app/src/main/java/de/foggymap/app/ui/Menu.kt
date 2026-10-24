@@ -374,6 +374,8 @@ private fun AppTab(onDataCleared: () -> Unit) {
         }
     }
 
+    ReportCard()
+
     SectionTitle("Über")
     Text("Kartendaten © OpenStreetMap-Mitwirkende (ODbL) · Karten- und Straßendaten: OpenFreeMap / OpenMapTiles · " +
         "Kartendarstellung: MapLibre Native · Geometrie: JTS Topology Suite.", color = Fog.Muted, fontSize = 11.sp, lineHeight = 15.sp)

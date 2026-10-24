@@ -110,6 +110,11 @@ Empfohlen ist **Cloudflare Workers + D1**: **kostenlos**, mit HTTPS, die Daten b
 
 ## 5. Wenn etwas nicht klappt
 
+**Problem melden:** Menü → App → **„Problem melden“** → kurz beschreiben, was passiert ist → **„Bericht teilen“** (z. B. per WhatsApp an dich selbst und dann hier in den Chat hochladen). Der Bericht enthält Gerät, Einstellungen, GPS-Qualität, Akkuverbrauch, Abstürze und das Protokoll der App. Er enthält **keine Orte, keine Straßennamen, keine Namen und keinen Gruppencode**. Mit „Bericht ansehen“ siehst du vorher alles.
+Stürzt FoggyMap ab oder friert ein, fragt die App beim nächsten Start, ob du den Bericht teilen möchtest.
+
+**Akkuverbrauch:** Menü → Info → *Akku & GPS* zeigt, wie viel Prozent pro Stunde das Handy beim Erkunden verliert (diese Tour, Durchschnitt, mit Live-Standort).
+
 | Problem | Lösung |
 |---|---|
 | „Kartendaten: …“ / „Offline …“ | Kein Netz oder der Kartenserver ist kurz nicht erreichbar. Die App versucht es nach wenigen Sekunden erneut, deine Wege gehen nicht verloren. |

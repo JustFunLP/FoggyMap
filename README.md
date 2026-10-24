@@ -58,6 +58,11 @@ scripts/       Emulator-End-to-End-Test (simulierte GPS-Route)
 - **Optional: eigener Server** (Cloudflare Worker + D1 oder Node.js + SQLite, siehe ANLEITUNG Abschnitt 4). Dann gilt: 12-stellige Gruppencodes, Ratenbegrenzung, Eingabeprüfung, Größenlimits und nur HTTPS. Mitglieds-IDs werden gehasht.
 - Geteilt werden nur aufgedeckte Flächen, Kilometerstände und der Anzeigename. Der **Live-Standort ist standardmäßig aus**. Er wird nur nach ausdrücklicher Bestätigung übertragen und verfällt nach 10 Minuten.
 
+## Fehlersuche
+
+- **Problembericht** (Menü → App): Gerät, Android, Einstellungen, GPS-Qualität der Tour (Median, 90 %, Anteil zu ungenau, Zeit je GPS-Stufe), Akku %/h (ganzes Handy, nur ohne Ladekabel, gesamt und mit Live-Standort), Kartencache, Koop-Status, Abstürze und das eigene Protokoll der App (`logcat --pid`). Bereinigt durch `ReportSanitizer` (Unit-Test): keine Koordinaten, Kachelnummern, Straßen- oder Personennamen, Gruppencodes, Schlüssel. Geteilt als Textdatei über einen FileProvider, nur nach Vorschau.
+- **Absturzberichte:** Java/Kotlin-Abstürze schreibt ein Handler vor dem Beenden in eine Datei. Native Abstürze (z. B. Kartengrafik) und Einfrieren (ANR) kommen aus Androids Exit-Historie (ab Android 11). Beim nächsten Start bietet die App einmal pro Vorfall an, den Bericht zu teilen.
+
 ## Abzeichen
 
 - Ein Abzeichen wird durch ein öffentliches, vom Admin signiertes Nostr-Ereignis vergeben (Kind 30078, `#t fm-badges`, ersetzbar je Abzeichen und Empfänger, also auch zurücknehmbar). Ziele: *alle Installationen bis Zeitpunkt T* (`firstInstallTime`), *Spieler-ID* (40 Bit des eigenen Geräte-Schlüssels, `XXXX-XXXX`) oder ein *Gruppenmitglied* (Schlüssel).

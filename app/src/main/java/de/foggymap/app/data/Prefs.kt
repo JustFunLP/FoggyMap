@@ -37,6 +37,25 @@ class Prefs(context: Context) {
         get() = p.getString("admin_secret", "") ?: ""
         set(v) = p.edit().putString("admin_secret", v).apply()
 
+    // Battery measured while exploring (whole phone, unplugged only): totals and the part with live sharing.
+    val batteryPct: Double get() = p.getFloat("bat_pct", 0f).toDouble()
+    val batteryHours: Double get() = p.getFloat("bat_hours", 0f).toDouble()
+    val batteryLivePct: Double get() = p.getFloat("bat_live_pct", 0f).toDouble()
+    val batteryLiveHours: Double get() = p.getFloat("bat_live_hours", 0f).toDouble()
+    fun addBattery(pct: Double, hours: Double, live: Boolean) {
+        val e = p.edit().putFloat("bat_pct", (batteryPct + pct).toFloat()).putFloat("bat_hours", (batteryHours + hours).toFloat())
+        if (live) e.putFloat("bat_live_pct", (batteryLivePct + pct).toFloat()).putFloat("bat_live_hours", (batteryLiveHours + hours).toFloat())
+        e.apply()
+    }
+    /** Summary of the last finished tour (numbers only, see TourStats). */
+    var lastTour: String
+        get() = p.getString("last_tour", "") ?: ""
+        set(v) = p.edit().putString("last_tour", v).apply()
+    /** Newest app exit (crash/ANR) already reported or dismissed. */
+    var exitAcknowledged: Long
+        get() = p.getLong("exit_ack", 0L)
+        set(v) = p.edit().putLong("exit_ack", v).apply()
+
     /** Map with north up instead of your viewing direction (compass button). */
     var northUp: Boolean
         get() = p.getBoolean("north_up", false)

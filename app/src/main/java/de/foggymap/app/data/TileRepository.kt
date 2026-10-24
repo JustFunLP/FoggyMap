@@ -120,6 +120,12 @@ class TileRepository(private val context: Context) {
 
     // ------------------------------------------------------------------ tiles on disk
 
+    /** Number and size of the stored map tiles (for the problem report). */
+    fun cacheInfo(): Pair<Int, Long> {
+        val files = dir.listFiles()?.filter { it.name.endsWith(".pbf.gz") } ?: emptyList()
+        return files.size to files.sumOf { it.length() }
+    }
+
     private fun tileFile(t: TileKey) = File(dir, "${t.name}.pbf.gz")
     private fun emptyMarker(t: TileKey) = File(dir, "${t.name}.empty")
     fun hasTile(t: TileKey) = tileFile(t).exists() || emptyMarker(t).exists()

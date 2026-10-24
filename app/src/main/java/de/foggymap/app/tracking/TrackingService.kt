@@ -89,6 +89,8 @@ class TrackingService : Service() {
     private var sessionMeters = 0.0
     private var lastRevealed: String? = null
     private var startedAt = 0L
+    /** GPS quality, GPS stages and battery of this tour (numbers only – for Menü → Info and problem reports). */
+    private var stats = de.foggymap.app.core.TourStats(0)
     private var lastNotify = 0L
     private var lastLivePush = 0L
     private var lastLocation: Location? = null
@@ -145,6 +147,8 @@ class TrackingService : Service() {
 
     private fun start() {
         startedAt = SystemClock.elapsedRealtime()
+        stats = de.foggymap.app.core.TourStats(System.currentTimeMillis()).also { it.stage("MOVING", System.currentTimeMillis()) }
+        sampleBattery()
         App.prefs.trackingWanted = true
         App.tracking.update { TrackingUi(active = true) }   // the GPS chip already shows "GPS …"
         App.trail.value = emptyList()
@@ -177,6 +181,7 @@ class TrackingService : Service() {
             lastLocation = loc
             App.showLocation(loc)
             App.live.onPosition(loc)
+            if (loc.hasAccuracy()) stats.addFix(loc.accuracy)
             if (loc.hasAccuracy() && loc.accuracy <= 35f) lastGoodFixAt = SystemClock.elapsedRealtime()
             val fix = Fix(loc.latitude, loc.longitude, if (loc.hasAccuracy() && loc.accuracy > 0f) loc.accuracy.toDouble() else 25.0, loc.time,
                 if (loc.hasSpeed()) loc.speed.toDouble() else null,
@@ -389,7 +394,31 @@ class TrackingService : Service() {
     private fun setProfile(p: LocationController.Profile) {
         android.util.Log.i("FoggyMap", "gps profile -> $p" + if (p == LocationController.Profile.STILL && locations.atKnownPlace) " (known place)" else "")
         locations.apply(p)
+        stats.stage(p.name, System.currentTimeMillis())
         App.tracking.update { it.copy(powerProfile = p.label) }
+    }
+
+    /** Battery reading (whole phone; only unplugged time counts) and fresh tour numbers for the UI. */
+    private fun sampleBattery() {
+        runCatching {
+            val bm = getSystemService(android.os.BatteryManager::class.java)
+            val level = bm?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)?.takeIf { it in 1..100 }
+            if (level != null) {
+                val charge = bm.getLongProperty(android.os.BatteryManager.BATTERY_PROPERTY_CHARGE_COUNTER).let { if (it > 0 && it != Long.MIN_VALUE) it else 0L }
+                val sticky = ContextCompat.registerReceiver(this, null, IntentFilter(Intent.ACTION_BATTERY_CHANGED), ContextCompat.RECEIVER_NOT_EXPORTED)
+                val plugged = (sticky?.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) ?: 0) != 0
+                val screen = getSystemService(PowerManager::class.java)?.isInteractive ?: true
+                val live = App.prefs.shareLiveLocation && App.sync.configured
+                stats.addBattery(de.foggymap.app.core.TourStats.BatterySample(System.currentTimeMillis(), level.toDouble(), charge, plugged, screen, live))
+                    ?.let { (pct, hours, l) -> App.prefs.addBattery(pct, hours, l) }
+            }
+            de.foggymap.app.data.Diagnostics.tour.value = tourSummary()
+        }
+    }
+
+    private fun tourSummary() = stats.summary(System.currentTimeMillis(), sessionSegments, sessionMeters).apply {
+        stats.drain.perHour?.let { put("rate", Math.round(it * 10) / 10.0) }
+        stats.drain.livePerHour?.let { put("liveRate", Math.round(it * 10) / 10.0) }
     }
 
     private fun wake(@Suppress("UNUSED_PARAMETER") reason: String) {
@@ -419,6 +448,7 @@ class TrackingService : Service() {
                 setProfile(LocationController.Profile.STILL)
             }
             if (tick % 2 == 0) flushStats()
+            if (tick % 4 == 0) sampleBattery()                     // every minute
             if (tick % 2 == 0 && queueDirty) persistQueue()
             if (tick % 12 == 0) App.sync.requestSync(0)            // every 3 minutes
             explorer?.let { ex -> if (queue.isNotEmpty()) drain(ex) }
@@ -511,6 +541,9 @@ class TrackingService : Service() {
     // ------------------------------------------------------------------ teardown
 
     private fun shutdown() {
+        sampleBattery()
+        App.prefs.lastTour = tourSummary().toString()
+        de.foggymap.app.data.Diagnostics.tour.value = null
         locations.stop()
         App.live.setSending(false)
         App.tracking.update { it.copy(active = false, message = null, loadingMap = false) }
