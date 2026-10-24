@@ -135,4 +135,11 @@ class UiScreenshotTest {
     fun modePicker() = shot("fortbewegung") {
         Sheet { ModeOptions(de.foggymap.app.core.TravelMode.TRAIN) {} }
     }
+
+    /** Large system font (130 %): the tab bar must not cut anything off. */
+    @Test fun menuLargeFont() {
+        org.robolectric.RuntimeEnvironment.setFontScale(1.3f)
+        try { shot("menu-grosse-schrift") { Sheet { MenuContent(group, null, {}, MenuTab.INFO, {}, {}) } } }
+        finally { org.robolectric.RuntimeEnvironment.setFontScale(1f) }
+    }
 }

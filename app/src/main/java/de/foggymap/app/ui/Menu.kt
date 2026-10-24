@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -121,17 +122,18 @@ private fun TabBar(selected: MenuTab, sync: SyncUi, onSelect: (MenuTab) -> Unit)
                 MenuTab.COOP -> painterResource(R.drawable.ic_group)
                 MenuTab.APP -> rememberVectorPainter(Icons.Filled.Settings)
             }
-            // Icon above the label: four tabs fit on any phone width.
-            Column(Modifier.weight(1f).height(58.dp).clip(RoundedCornerShape(14.dp))
+            // Icon above the label: four tabs fit on any phone width. The cell grows with large system fonts
+            // and the group size sits beside the icon, so nothing is cut off.
+            Column(Modifier.weight(1f).heightIn(min = 58.dp).clip(RoundedCornerShape(14.dp))
                 .then(if (active) Modifier.background(Fog.button) else Modifier)
-                .clickable { onSelect(t) }, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-                Box(contentAlignment = Alignment.Center) {
+                .clickable { onSelect(t) }.padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(icon, null, tint = if (active) Color.White else Fog.Lavender, modifier = Modifier.size(20.dp))
                     if (t == MenuTab.COOP && sync.inGroup) {
-                        Box(Modifier.offset(x = 14.dp, y = (-7).dp).size(15.dp).clip(CircleShape)
-                            .background(if (active) Color.White.copy(alpha = 0.3f) else Fog.Violet), contentAlignment = Alignment.Center) {
-                            Text("${maxOf(sync.members.size, 1)}", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        }
+                        Spacer(Modifier.width(4.dp))
+                        Text("${maxOf(sync.members.size, 1)}", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                                .background(if (active) Color.White.copy(alpha = 0.3f) else Fog.Violet).padding(horizontal = 5.dp))
                     }
                 }
                 Spacer(Modifier.height(3.dp))
