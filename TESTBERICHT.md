@@ -46,6 +46,8 @@ Letzter Lauf (23.10.2026, abends, mit automatischer GPS-Steuerung): Kacheln live
 Der Zellaufbau dauerte im Emulator 13 s (erstes Mal, ohne Cache) bzw. 1,6–6 s (aus dem Cache), am PC 0,15 s. Der CI-Emulator ist sehr langsam (Debug-Build, keine Grafikkarte).
 Die Karte selbst lässt sich im GitHub-Emulator nicht anzeigen: Ohne Grafikkarte stürzt der OpenGL-Übersetzer des Emulators ab (`libGLESv2_enc.so`). Der Aufzeichnungsdienst startet danach von selbst neu und macht weiter, die Screenshots zeigen aber den Startbildschirm. Deshalb sind die neuen Kartenknöpfe nur in den Oberflächen-Bildern (4.) geprüft, nicht per Tipp im Emulator. Auf deinem Handy lief die Karte bisher.
 
+Lauf vom 24.10.2026 mit Google-Standortdienst und Aktivitätserkennung: 15 Straßenabschnitte (1,12 km), 14 Häuserblöcke und 140 Gebäude aufgedeckt, **171 von 171 Funden auf dem Koop-Server**. Die Aktivitätserkennung des Emulators meldete mitten in der Fahrt „steht“ (er hat keine echten Bewegungssensoren). Weil die GPS-Positionen weiter Bewegung zeigten, blieb das GPS an, und erst nach der Ankunft ging es aus (GPS-Stufen: in Bewegung/Fahrt im Wechsel, am Ziel aus). Der erste Lauf mit dieser Version hatte genau hier einen Fehler: Das GPS ging aus, weil es vor der Abfahrt schon 20 s gestanden hatte. Seitdem muss das GPS das Stehen 20 s *nach* der Sensor-Meldung bestätigen.
+
 **4. Oberfläche (Screenshots ohne Gerät)**
 Menü (Info, Erkunden, Koop mit und ohne Gruppe, App) und die Kartenknöpfe (Menü, Kompass, 2D/3D, Standort, Start/Beenden) werden bei jedem Build mit Robolectric gerendert und als Bilder abgelegt. Geprüft am 23.10.2026: Texte, Schalter, Skizzen der Aufdeck-Modi, Kompassnadel, Info-Reiter mit GPS-Zustand.
 

@@ -185,8 +185,9 @@ internal fun InfoTab(sync: SyncUi) {
         MotionLine()
         Spacer(Modifier.height(8.dp))
         Text("Es gibt keine GPS-Einstellungen. Wie bei Google Maps und Waze kommt dein Standort vom Google-Standortdienst. " +
-            "In Bewegung misst FoggyMap alle 2–3 Sekunden. Merkt dein Handy, dass du stehst (Bewegungserkennung), geht das GPS nach " +
-            "etwa 20 Sekunden ganz aus und springt wieder an, sobald du losgehst. Ohne Bewegungserkennung wird nach 30 Sekunden " +
+            "In Bewegung misst FoggyMap alle 2–3 Sekunden. Merkt dein Handy, dass du stehst (Bewegungserkennung, meist nach einer halben " +
+            "bis ganzen Minute), und zeigt auch das GPS 20 Sekunden lang keine Bewegung, geht das GPS ganz aus. Es springt wieder an, " +
+            "sobald du losgehst. Ohne Bewegungserkennung wird nach 30 Sekunden " +
             "gedrosselt und nach 2,5 Minuten ausgeschaltet (an Orten, an denen du oft stehst, schon nach 40 Sekunden). " +
             "Das alles bleibt auf deinem Handy.", color = Fog.Muted, fontSize = 11.sp, lineHeight = 15.sp)
     }

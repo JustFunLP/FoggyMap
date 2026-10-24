@@ -84,7 +84,7 @@ Wie bei Google Maps und Waze: Standort vom **Google Fused Location Provider** (P
 
 | Maßnahme | Wirkung |
 |---|---|
-| **Aktivitätserkennung meldet „steht“ und das GPS bestätigt es (20 s ohne Bewegung) → GPS ganz aus.** Wieder an, sobald der Sensor „geht / Rad / Fahrzeug“ meldet oder der Bewegungssensor auslöst. Im Stand keine GPS-Stichproben, nur kostenlose passive Positionen | größter Effekt: GPS an jeder Ampel, im Café, im Büro aus |
+| **Aktivitätserkennung meldet „steht“ und das GPS bestätigt es (20 s ohne Bewegung nach der Meldung, falls der Sensor sich irrt) → GPS ganz aus.** Wieder an, sobald der Sensor „geht / Rad / Fahrzeug“ meldet oder der Bewegungssensor auslöst. Im Stand nur kostenlose passive Positionen und als Notbremse alle 4 min eine einzelne GPS-Messung | größter Effekt: GPS an jeder Ampel, im Café, im Büro aus |
 | Ohne Aktivitätserkennung: nach ~30 s Stillstand alle 10 s, nach ~2,5 min aus (an oft besuchten Orten nach ~40 s), Stichprobe alle 1,5 min | wie bisher |
 | Kein GPS-Empfang seit 3 min (drinnen) → aus | verhindert stundenlange Satellitensuche |
 | Update-Rate je nach Tempo (zu Fuß alle 3 s, Auto alle 2 s) | genug Punkte auch für kurze Abschnitte |
