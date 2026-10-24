@@ -72,13 +72,21 @@ object App {
     val manualMode = MutableStateFlow<de.foggymap.app.core.TravelMode?>(null)
     private val displayFilter = de.foggymap.app.core.PositionFilter()
 
-    /** Your position for the map: steadied while you stand (see PositionFilter), immediate while you move. */
-    fun showLocation(loc: Location) {
+    /** Your figure on the street (while exploring): set together with [location], always before it. */
+    val snap = MutableStateFlow<de.foggymap.app.core.RoadSnapper.Snap?>(null)
+
+    /**
+     * Your position for the map: steadied while you stand (see PositionFilter), immediate while you move,
+     * and – while exploring – put on the street you are on ([snapper], see RoadSnapper).
+     */
+    fun showLocation(loc: Location, snapper: ((Location) -> de.foggymap.app.core.RoadSnapper.Snap?)? = null) {
         val e = synchronized(displayFilter) {
             displayFilter.update(loc.latitude, loc.longitude, if (loc.hasAccuracy()) loc.accuracy.toDouble() else 30.0, loc.time,
                 if (loc.hasSpeed()) loc.speed.toDouble() else null)
         }
-        location.value = Location(loc).apply { latitude = e.lat; longitude = e.lon; accuracy = e.accuracy.toFloat() }
+        val shown = Location(loc).apply { latitude = e.lat; longitude = e.lon; accuracy = e.accuracy.toFloat() }
+        snap.value = snapper?.let { runCatching { it(shown) }.getOrNull() }
+        location.value = shown
     }
     val coverage = MutableStateFlow<Coverage?>(null)
     /**

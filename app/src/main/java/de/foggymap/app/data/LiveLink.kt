@@ -20,10 +20,16 @@ data class LiveFriend(val key: String, val name: String, val pos: LatLon, val he
  *  - sending: only while exploring AND "Live-Standort" is switched on (explicit opt-in),
  *  - listening: while the map is on screen and you are in a group.
  * Sends position + direction every ~2.5 s while moving (every 15 s while standing) together with the
- * reveals made since the last message, so friends see your fog clear up almost at once.
+ * reveals made since the last message, so friends see your fog clear up almost at once – but only while
+ * somebody in the group actually has the map open (they send a small "I am looking" sign every 30 s).
+ * When nobody looks, every 20 s / 60 s is enough and the phone's radio can sleep in between.
  */
 class LiveLink(private val sync: SyncManager, private val db: RevealDatabase, private val prefs: Prefs) {
     val friends = MutableStateFlow<Map<String, LiveFriend>>(emptyMap())
+    /** Somebody in the group has the map open right now (then your live position goes out every 2–3 s). */
+    val watched = MutableStateFlow(false)
+    private val watchers = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private var presenceJob: kotlinx.coroutines.Job? = null
 
     private var link: NostrLive? = null
     /** Open live connections (for the problem report). */
@@ -50,13 +56,40 @@ class LiveLink(private val sync: SyncManager, private val db: RevealDatabase, pr
             link?.stop(); link = null; linkCode = ""
             if (!share) synchronized(pending) { pending.clear() }
         }
-        if (!wanted) { if (!listening) friends.value = emptyMap(); return }
+        if (!wanted) {
+            if (!listening) friends.value = emptyMap()
+            presenceJob?.cancel(); presenceJob = null
+            watchers.clear(); watched.value = false
+            return
+        }
         val l = link ?: sync.liveChannel()?.also { ch ->
             ch.onLive = { onFriend(it) }
+            ch.onPresence = { key -> watchers[key] = System.currentTimeMillis(); updateWatched() }
             link = ch; linkCode = prefs.groupCode
         } ?: return
         l.start(listen = listening)
         l.setListening(listening)
+        // While the map is on screen: "I am looking" every 30 s (first one as soon as a relay is connected).
+        // Also re-checks who is still looking.
+        if (presenceJob?.isActive != true) presenceJob = App.scope.launch(Dispatchers.IO) {
+            var sentOnce = false
+            while (true) {
+                val ch = synchronized(this@LiveLink) { link } ?: break
+                if (listening) {
+                    val n = runCatching { ch.sendPresence() }.getOrDefault(0)
+                    if (n > 0) sentOnce = true
+                }
+                updateWatched()
+                kotlinx.coroutines.delay(if (listening && !sentOnce) 3_000 else PRESENCE_MS)
+                if (!listening) sentOnce = false
+            }
+        }
+    }
+
+    private fun updateWatched() {
+        val now = System.currentTimeMillis()
+        watchers.entries.removeAll { now - it.value > WATCH_MS }
+        watched.value = watchers.isNotEmpty()
     }
 
     /** New own reveals: they travel with the next live message. */
@@ -73,7 +106,12 @@ class LiveLink(private val sync: SyncManager, private val db: RevealDatabase, pr
         val pos = LatLon(loc.latitude, loc.longitude)
         val moved = lastSentPos?.let { Geo.distance(it, pos) } ?: Double.MAX_VALUE
         val hasItems = synchronized(pending) { pending.isNotEmpty() }
-        val due = if (moved > 2.0 || hasItems) INTERVAL_MS else STANDING_MS
+        updateWatched()
+        val looking = watched.value
+        val due = when {
+            moved > 2.0 || hasItems -> if (looking) INTERVAL_MS else UNWATCHED_INTERVAL_MS
+            else -> if (looking) STANDING_MS else UNWATCHED_STANDING_MS
+        }
         if (now - lastSentAt < due) return
         if (loc.hasBearing() && loc.hasSpeed() && loc.speed > 0.8f) lastHeading = loc.bearing.toDouble()
         val items = synchronized(pending) {
@@ -109,6 +147,12 @@ class LiveLink(private val sync: SyncManager, private val db: RevealDatabase, pr
     companion object {
         const val INTERVAL_MS = 2_500L
         const val STANDING_MS = 15_000L
+        /** Nobody has the map open: the radio may sleep in between. */
+        const val UNWATCHED_INTERVAL_MS = 20_000L
+        const val UNWATCHED_STANDING_MS = 60_000L
+        const val PRESENCE_MS = 30_000L
+        /** A "looking" sign counts this long (two missed signs and the sender slows down again). */
+        const val WATCH_MS = 75_000L
         /** A friend not heard of for this long disappears from the live view. */
         const val STALE_MS = 120_000L
     }

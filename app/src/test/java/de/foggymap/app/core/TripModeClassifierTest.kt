@@ -6,8 +6,9 @@ import org.junit.Test
 
 class TripModeClassifierTest {
     /** Feeds a trip (one fix every 3 s) and returns metres per mode. */
-    private fun trip(vararg parts: Pair<Int, (Int) -> Double>): Map<TravelMode, Double> {
+    private fun trip(vararg parts: Pair<Int, (Int) -> Double>, sensor: TravelMode? = null): Map<TravelMode, Double> {
         val c = TripModeClassifier()
+        sensor?.let { c.activity(0, it) }
         val total = HashMap<TravelMode, Double>()
         var t = 0L
         fun merge(m: Map<TravelMode, Double>) = m.forEach { (k, v) -> total[k] = (total[k] ?: 0.0) + v }
@@ -59,5 +60,27 @@ class TripModeClassifierTest {
         c.manual = TravelMode.BIKE
         assertEquals(TravelMode.BIKE, c.current())
         assertEquals(mapOf(TravelMode.BIKE to 30.0), c.add(t + 200_000, 3.0, 30.0).let { c.flush() })
+    }
+
+    @Test fun activityRecognitionSettlesTrafficJamsSlowBikesAndFastRunners() {
+        // A car crawling in a jam (never above 25 km/h) looks like a bike by speed alone.
+        val jam = { s: Int -> val ph = s % 40; if (ph < 10) 0.0 else 6.5 }
+        assertTrue(share(trip(600 to jam), TravelMode.CAR) < 0.5)
+        assertTrue("jam with sensor ${trip(600 to jam, sensor = TravelMode.CAR)}", share(trip(600 to jam, sensor = TravelMode.CAR), TravelMode.CAR) > 0.95)
+        // A relaxed cyclist at 13 km/h looks like a runner.
+        val slowBike = { _: Int -> 3.6 }
+        assertTrue(share(trip(600 to slowBike), TravelMode.WALK) > 0.95)
+        assertTrue(share(trip(600 to slowBike, sensor = TravelMode.BIKE), TravelMode.BIKE) > 0.95)
+        // A sprinter at 18 km/h looks like a bike.
+        val sprint = { _: Int -> 5.0 }
+        assertTrue(share(trip(300 to sprint, sensor = TravelMode.WALK), TravelMode.WALK) > 0.95)
+        // A "bike" hint at motorway speed is ignored.
+        assertTrue(share(trip(300 to { 25.0 }, sensor = TravelMode.BIKE), TravelMode.CAR) > 0.95)
+        val c = TripModeClassifier()
+        c.activity(0, TravelMode.CAR)
+        c.speed(10_000, 1.0)
+        assertEquals(TravelMode.STILL, c.current())   // standing in the car (traffic light)
+        c.speed(13_000, 6.0)
+        assertEquals(TravelMode.CAR, c.current())
     }
 }

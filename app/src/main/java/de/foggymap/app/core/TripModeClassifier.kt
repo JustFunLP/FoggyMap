@@ -12,13 +12,16 @@ package de.foggymap.app.core
  *  - slow for the whole next 90 s (parked and walking away) → on foot,
  *  - bike speeds around (above [BIKE_SPEED]) → bike,
  *  - otherwise on foot (walking and running).
- * Chosen by hand ([manual]) always wins.
+ * The phone's activity recognition ([activity]: vehicle / bicycle / on foot) breaks ties that speed alone
+ * cannot: a car in a traffic jam, a slow cyclist, a fast runner. Chosen by hand ([manual]) always wins.
  */
 class TripModeClassifier {
     private class Piece(val timeMs: Long, val speed: Double, val meters: Double)
     private class Sample(val timeMs: Long, val speed: Double, val onRail: Boolean)
     private val pending = ArrayDeque<Piece>()
     private val speeds = ArrayDeque<Sample>()
+    private class Hint(val timeMs: Long, val mode: TravelMode)
+    private val hints = ArrayDeque<Hint>()
     private var latest = 0L
     /** Set by hand in the app (null = automatic). */
     var manual: TravelMode? = null
@@ -32,6 +35,15 @@ class TripModeClassifier {
         return decide(all = false)
     }
 
+    /** The phone's activity recognition entered [mode] at [timeMs] (valid until the next one). */
+    fun activity(timeMs: Long, mode: TravelMode) {
+        hints.addLast(Hint(timeMs, mode))
+        while (hints.size > 50) hints.removeFirst()
+    }
+
+    /** What activity recognition said around [t] (it reports with up to a minute delay). */
+    private fun hintAt(t: Long): TravelMode? = hints.lastOrNull { it.timeMs <= t + HINT_DELAY_MS }?.mode
+
     /** Only a speed (no distance counted, e.g. a fix the street matcher did not use). */
     fun speed(timeMs: Long, speed: Double, onRail: Boolean = false) = add(timeMs, speed, 0.0, onRail)
 
@@ -43,8 +55,12 @@ class TripModeClassifier {
         manual?.let { return it }
         val recent = speeds.filter { nowMs - it.timeMs <= 60_000 }.map { it.speed }
         val last = recent.lastOrNull() ?: return TravelMode.STILL
+        val hint = hintAt(nowMs)
         return when {
             onTrain(speeds.filter { nowMs - it.timeMs <= DECIDE_AFTER_MS }) -> TravelMode.TRAIN
+            hint == TravelMode.CAR -> if (last > SLOW) TravelMode.CAR else TravelMode.STILL
+            hint == TravelMode.BIKE && last >= 1.0 && recent.none { it > BIKE_MAX } -> TravelMode.BIKE
+            hint == TravelMode.WALK && last >= 0.5 && recent.none { it > CAR_SPEED } -> TravelMode.WALK
             speeds.any { nowMs - it.timeMs <= BEFORE_MS && it.speed > CAR_SPEED } && last > SLOW -> TravelMode.CAR
             last < SLOW && speeds.any { nowMs - it.timeMs <= BEFORE_MS && it.speed > CAR_SPEED } -> TravelMode.STILL   // traffic light or parked
             last < 0.5 -> TravelMode.STILL
@@ -74,8 +90,12 @@ class TripModeClassifier {
         val window = speeds.filter { it.timeMs in (p.timeMs - BEFORE_MS)..(p.timeMs + DECIDE_AFTER_MS) }
         val after = speeds.filter { it.timeMs in p.timeMs..(p.timeMs + DECIDE_AFTER_MS) }.map { it.speed }
         val around = window.map { it.speed }
+        val hint = hintAt(p.timeMs)
         return when {
             onTrain(window) -> TravelMode.TRAIN
+            hint == TravelMode.CAR && (p.speed > SLOW || around.any { it > BIKE_SPEED }) -> TravelMode.CAR
+            hint == TravelMode.BIKE && p.speed > 1.5 && around.none { it > BIKE_MAX } -> TravelMode.BIKE
+            hint == TravelMode.WALK && around.none { it > CAR_SPEED } -> TravelMode.WALK
             p.speed < SLOW && after.size >= 3 && after.all { it < SLOW } -> TravelMode.WALK
             around.any { it > CAR_SPEED } -> TravelMode.CAR
             around.any { it > BIKE_SPEED } && p.speed > 2.0 -> TravelMode.BIKE
@@ -91,6 +111,9 @@ class TripModeClassifier {
         /** ~16 km/h: faster than running. */
         const val BIKE_SPEED = 4.5
         const val SLOW = 2.2
+        /** ~47 km/h: no bike in town goes faster (activity recognition said "bike" but it is not). */
+        const val BIKE_MAX = 13.0
+        const val HINT_DELAY_MS = 60_000L
         const val BEFORE_MS = 180_000L
         const val DECIDE_AFTER_MS = 90_000L
     }

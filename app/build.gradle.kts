@@ -90,6 +90,8 @@ dependencies {
     implementation("org.maplibre.gl:android-sdk:11.8.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+    // Google's fused location + activity recognition (what Google Maps and Waze use); falls back to plain GPS without Play services.
+    implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("org.locationtech.jts:jts-core:1.20.0")
 
     testImplementation("junit:junit:4.13.2")

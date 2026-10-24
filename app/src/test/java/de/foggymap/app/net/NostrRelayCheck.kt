@@ -91,17 +91,21 @@ class NostrRelayCheck {
     }
 
     /** Live channel: ephemeral events must arrive at a listening member within seconds. */
-    private fun liveRoundTrip(urls: List<String>, messages: Int = 4): Pair<Int, Long> {
+    private fun liveRoundTrip(urls: List<String>, messages: Int = 4, bUrls: List<String> = urls, presence: IntArray? = null): Pair<Int, Long> {
         val code = code(); val g = GroupKey(code)
         val ua = "FoggyMap-CI/1.0 (+https://github.com/JustFunLP/FoggyMap)"
         val a = NostrLive(urls, ua, Schnorr.newSecretKey(), g)
-        val b = NostrLive(urls, ua, Schnorr.newSecretKey(), g)
+        val b = NostrLive(bUrls, ua, Schnorr.newSecretKey(), g)
         val got = java.util.Collections.synchronizedList(ArrayList<Pair<NostrLive.Live, Long>>())
         b.onLive = { got += it to System.currentTimeMillis() }
+        a.onPresence = { presence?.let { p -> synchronized(p) { p[0]++ } } }
         b.start(listen = true); a.start(listen = false)
         val t0 = System.currentTimeMillis()
-        while ((a.connectedRelays < urls.size || b.connectedRelays < urls.size) && System.currentTimeMillis() - t0 < 10_000) Thread.sleep(100)
+        val want = minOf(urls.size, NostrLive.MAX_RELAYS)
+        while ((a.connectedRelays < want || b.connectedRelays < minOf(bUrls.size, NostrLive.MAX_RELAYS)) && System.currentTimeMillis() - t0 < 10_000) Thread.sleep(100)
         Thread.sleep(1_000)   // let the subscription settle
+        // The listener says "I am looking" – the sender (not listening to positions) must hear it.
+        if (presence != null) { b.sendPresence(); Thread.sleep(2_000) }
         val sentAt = ArrayList<Long>()
         val item = TestWorlds.grid().let { m -> m.segments.first { it.matchable }.let { m.reveal(it).first() } }
         for (k in 0 until messages) {
@@ -122,8 +126,14 @@ class NostrRelayCheck {
             val (n, ms) = liveRoundTrip(listOf(url), 3)
             note("::notice title=Live über $url::$n/3 Live-Nachrichten angekommen" + if (ms >= 0) ", erste nach $ms ms" else "")
         }
-        val (n, ms) = liveRoundTrip(NostrRelays.DEFAULT, 4)
-        note("::notice title=Live über alle Relays::$n/4 Live-Nachrichten angekommen, erste nach $ms ms")
+        val presence = IntArray(1)
+        val (n, ms) = liveRoundTrip(NostrRelays.DEFAULT, 4, presence = presence)
+        note("::notice title=Live über die Standard-Relays::$n/4 Live-Nachrichten angekommen, erste nach $ms ms · \"Karte offen\"-Signal ${presence[0]}× gehört")
         assertTrue("live messages arrive through the default relays", n >= 3)
+        assertTrue("the sender hears that someone is looking", presence[0] >= 1)
+        // Two members using different relay choices (first three vs. last three) still meet on the shared one.
+        val (n2, ms2) = liveRoundTrip(NostrRelays.DEFAULT, 4, bUrls = NostrRelays.DEFAULT.reversed())
+        note("::notice title=Live mit verschiedener Relay-Auswahl::$n2/4 Live-Nachrichten angekommen, erste nach $ms2 ms")
+        assertTrue("different relay choices still meet", n2 >= 3)
     }
 }

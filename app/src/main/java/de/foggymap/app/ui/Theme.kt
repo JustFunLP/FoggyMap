@@ -134,6 +134,10 @@ fun SectionTitle(text: String) {
         modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
 }
 
+/** Long German words break with a hyphen ("Straßen-abschnitte") instead of in the middle ("Straßenabsch nitte"). */
+val Hyphenated = androidx.compose.ui.text.TextStyle(hyphens = androidx.compose.ui.text.style.Hyphens.Auto,
+    lineBreak = androidx.compose.ui.text.style.LineBreak.Paragraph)
+
 @Composable
 fun StatTile(value: String, label: String, painter: Painter, modifier: Modifier = Modifier) {
     Row(modifier.clip(RoundedCornerShape(18.dp)).background(Fog.SurfaceHigh).padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -143,7 +147,7 @@ fun StatTile(value: String, label: String, painter: Painter, modifier: Modifier 
         Spacer(Modifier.width(12.dp))
         Column {
             Text(value, color = Fog.Text, fontSize = 19.sp, fontWeight = FontWeight.Bold)
-            Text(label, color = Fog.Muted, fontSize = 11.sp, lineHeight = 13.sp)
+            Text(label, color = Fog.Muted, fontSize = 11.sp, lineHeight = 13.sp, style = androidx.compose.material3.LocalTextStyle.current.merge(Hyphenated))
         }
     }
 }

@@ -79,6 +79,8 @@ class TrackingService : Service() {
     // Battery profile state
     private var stillAnchor: LatLon? = null
     private var stillSince = 0L
+    /** The phone's activity recognition says "standing" (null = no such sensor information right now). */
+    private var sensorStill = false
     /** Places where you often stand still (learned on the phone, never shared). */
     private val restSpots by lazy { de.foggymap.app.core.RestSpots.decode(App.prefs.restSpots) }
     private var lastGoodFixAt = 0L
@@ -130,7 +132,7 @@ class TrackingService : Service() {
             scope.launch { explorer?.settings = App.prefs.revealSettings(); radius.reset() }
             if (!App.prefs.shareLiveLocation) App.scope.launch { App.sync.clearLive() }
             App.live.refresh()
-            locations.liveMode = App.prefs.shareLiveLocation && App.sync.configured
+            locations.liveMode = App.live.watched.value && App.prefs.shareLiveLocation && App.sync.configured
             return START_STICKY
         }
         if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
@@ -165,8 +167,13 @@ class TrackingService : Service() {
             locations.lastKnown()?.let { last -> prefetch(LatLon(last.latitude, last.longitude)) }
             queue.peekLast()?.let { publishTrail(it.pos, force = true) }
         }
-        locations.liveMode = App.prefs.shareLiveLocation && App.sync.configured
         App.live.setSending(true)
+        // Live position without batching only while a group member is actually looking (map open).
+        scope.launch { App.live.watched.collect { w -> locations.liveMode = w && App.prefs.shareLiveLocation && App.sync.configured } }
+        // Activity recognition (like Google Maps / Waze): GPS off as soon as you stand, on as soon as you move.
+        locations.motionAware = Motion.start(this)
+        scope.launch { Motion.state.collect { st -> if (st != null) onMotion(st) } }
+        android.util.Log.i("FoggyMap", "location source: ${locations.engineName}, activity recognition: ${if (locations.motionAware) "on" else "off"}")
         locations.apply(LocationController.Profile.MOVING)
         // Know where you are right away – no need to take a few steps first.
         locations.pingNow { loc -> scope.launch { onLocations(listOf(loc)) } }
@@ -184,7 +191,7 @@ class TrackingService : Service() {
             val ageMs = (SystemClock.elapsedRealtimeNanos() - loc.elapsedRealtimeNanos) / 1_000_000
             if (ageMs > 15 * 60_000) continue
             lastLocation = loc
-            App.showLocation(loc)
+            App.showLocation(loc) { shown -> snapForDisplay(ex, shown) }
             App.live.onPosition(loc)
             if (loc.hasAccuracy()) stats.addFix(loc.accuracy)
             if (loc.hasAccuracy() && loc.accuracy <= 35f) lastGoodFixAt = SystemClock.elapsedRealtime()
@@ -205,6 +212,24 @@ class TrackingService : Service() {
         }
         maybeNotify()
         maybePushLive()
+    }
+
+    /** Your figure on the street you are on (display only – revealing is decided by the matcher). */
+    private val snapper = de.foggymap.app.core.RoadSnapper()
+
+    private fun snapForDisplay(ex: Explorer, l: Location): de.foggymap.app.core.RoadSnapper.Snap? {
+        val p = LatLon(l.latitude, l.longitude)
+        val manual = App.manualMode.value
+        // On a train you are not on a street; without map data there is nothing to snap to.
+        if (manual == TravelMode.TRAIN || (manual == null && tripMode.current() == TravelMode.TRAIN) || !ex.hasCell(CellKey.of(p))) {
+            snapper.reset(); return null
+        }
+        val moving = l.hasSpeed() && l.speed > 0.8f
+        val heading = if (moving && l.hasBearing()) l.bearing.toDouble() else null
+        val carOnly = manual == TravelMode.CAR || (l.hasSpeed() && l.speed > 9f)
+        return snapper.snap(p, if (l.hasAccuracy()) l.accuracy.toDouble() else 25.0, heading, moving, l.time) { q, r ->
+            ex.candidates(q, r).let { c -> if (carOnly) c.filter { it.segment.roadClass.vehicular } else c }
+        }
     }
 
     private fun enqueue(fix: Fix) {
@@ -381,8 +406,8 @@ class TrackingService : Service() {
 
     /**
      * The GPS rate follows how you move – there are no settings:
-     * moving → full rate, ~30 s standing → throttled, ~2.5 min standing → GPS pause.
-     * At a place where you have often stood before (home, office) the pause comes after ~40 s.
+     * moving → full rate; standing → GPS off after ~20 s when the phone's activity recognition agrees,
+     * otherwise throttled after ~30 s and off after ~2.5 min (~40 s at a place where you often stand).
      */
     private fun updateProfile(fix: Fix, @Suppress("UNUSED_PARAMETER") loc: Location) {
         val now = SystemClock.elapsedRealtime()
@@ -396,10 +421,16 @@ class TrackingService : Service() {
         }
         val stillFor = now - stillSince
         val knownPlace = fix.accuracy <= 50.0 && restSpots.isKnown(stillAnchor ?: fix.pos)
+        // The motion sensor says "standing" and the GPS agrees (no movement for 20 s): GPS off right away.
+        val stillAfter = when {
+            sensorStill -> STILL_WITH_SENSOR_MS
+            knownPlace -> STILL_AT_KNOWN_PLACE_MS
+            else -> STILL_AFTER_MS
+        }
         val target = when {
             current == LocationController.Profile.STILL -> LocationController.Profile.STILL
-            stillFor > (if (knownPlace) STILL_AT_KNOWN_PLACE_MS else STILL_AFTER_MS) -> LocationController.Profile.STILL
-            stillFor > SLOW_AFTER_MS -> LocationController.Profile.SLOW
+            stillFor > stillAfter -> LocationController.Profile.STILL
+            !sensorStill && stillFor > SLOW_AFTER_MS -> LocationController.Profile.SLOW
             speed > 7.0 -> LocationController.Profile.FAST
             current == LocationController.Profile.FAST && speed >= 5.0 -> LocationController.Profile.FAST
             else -> LocationController.Profile.MOVING
@@ -440,8 +471,24 @@ class TrackingService : Service() {
     }
 
     private fun tourSummary() = stats.summary(System.currentTimeMillis(), sessionSegments, sessionMeters).apply {
+        put("engine", locations.engineName)
+        put("motion", locations.motionAware && Motion.running)
         stats.drain.perHour?.let { put("rate", Math.round(it * 10) / 10.0) }
         stats.drain.livePerHour?.let { put("liveRate", Math.round(it * 10) / 10.0) }
+    }
+
+    /** Activity recognition reported a change (standing / walking / bike / vehicle). */
+    private fun onMotion(st: Motion.State) {
+        if (st.mode == TravelMode.STILL && st.entered) {
+            sensorStill = true
+            // Check right away whether the GPS agrees (the next fix would do it too, a few seconds later).
+            lastLocation?.let { loc -> updateProfile(Fix(loc.latitude, loc.longitude, if (loc.hasAccuracy()) loc.accuracy.toDouble() else 25.0, loc.time,
+                if (loc.hasSpeed()) loc.speed.toDouble() else null), loc) }
+            return
+        }
+        sensorStill = false
+        if (st.mode != TravelMode.STILL) tripMode.activity(st.atMs, st.mode)
+        wake("Bewegung (Sensor)")
     }
 
     private fun wake(@Suppress("UNUSED_PARAMETER") reason: String) {
@@ -470,6 +517,12 @@ class TrackingService : Service() {
                 locations.atKnownPlace = false
                 setProfile(LocationController.Profile.STILL)
             }
+            if (locations.motionAware && !Motion.running && tick >= 2) {
+                locations.motionAware = false   // Play services refused activity recognition: fall back to GPS-only decisions
+                sensorStill = false
+                locations.current?.let { locations.apply(it, force = true) }
+                android.util.Log.w("FoggyMap", "activity recognition unavailable – GPS decides alone")
+            }
             if (tick % 2 == 0) flushStats()
             if (tick % 4 == 0) sampleBattery()                     // every minute
             if (tick % 2 == 0 && queueDirty) persistQueue()
@@ -491,7 +544,7 @@ class TrackingService : Service() {
         if (!App.prefs.shareLiveLocation || !App.sync.configured) return
         val loc = lastLocation ?: return
         val now = SystemClock.elapsedRealtime()
-        if (now - lastLivePush < 60_000) return
+        if (now - lastLivePush < 180_000) return   // the slow fallback card; friends looking get the live channel
         lastLivePush = now
         App.scope.launch { App.sync.pushLive(loc.latitude, loc.longitude) }
     }
@@ -570,6 +623,7 @@ class TrackingService : Service() {
         App.prefs.lastTour = tourSummary().toString()
         de.foggymap.app.data.Diagnostics.tour.value = null
         locations.stop()
+        Motion.stop(this)
         App.live.setSending(false)
         App.tracking.update { it.copy(active = false, message = null, loadingMap = false) }
         if (App.prefs.shareLiveLocation) App.scope.launch { App.sync.clearLive() }
@@ -594,6 +648,7 @@ class TrackingService : Service() {
 
     override fun onDestroy() {
         locations.stop()
+        Motion.stop(this)
         runCatching { unregisterReceiver(screenReceiver) }
         App.tracking.update { it.copy(active = false, loadingMap = false) }
         val pending = ArrayList(queue)
@@ -626,6 +681,7 @@ class TrackingService : Service() {
         const val TRAIL_POINTS = 900
         const val STILL_AFTER_MS = 150_000L
         const val STILL_AT_KNOWN_PLACE_MS = 40_000L
+        const val STILL_WITH_SENSOR_MS = 20_000L
         const val SLOW_AFTER_MS = 30_000L
         const val NO_SIGNAL_MS = 180_000L
 

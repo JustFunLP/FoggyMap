@@ -15,42 +15,51 @@ import androidx.core.content.ContextCompat
 import androidx.core.location.LocationListenerCompat
 import androidx.core.location.LocationManagerCompat
 import androidx.core.location.LocationRequestCompat
+import com.google.android.gms.location.CurrentLocationRequest
+import com.google.android.gms.location.LocationCallback
+import com.google.android.gms.location.LocationRequest
+import com.google.android.gms.location.LocationResult
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 
 /**
  * Battery-aware location subscription. There are no settings: the rate follows how you move.
  *
- *  - Moving: on foot every 3 s / 4 m, by car every 2 s / 10 m.
- *  - Standing for ~30 s (traffic light, shop window): GPS throttled to one fix every 10 s.
- *  - Standing for ~2.5 min – or ~40 s at a place where you often stand ([de.foggymap.app.core.RestSpots]) –
- *    GPS is switched off. Then only (a) a low-power Wi-Fi/cell fix, (b) positions other apps request
- *    anyway (passive, free) and (c) a short single GPS fix every 45 s (90 s at a known place) are used.
- *    The hardware "significant motion" sensor (practically free) wakes GPS as soon as you walk on;
- *    the GPS samples catch cases the sensor misses (car, bike, phones without that sensor).
- *  - No GPS signal for minutes (indoors, underground) → also drop to low power instead of letting
- *    the receiver search forever.
- *  - Screen off → fixes are *batched* by the location hardware (Android 12+): the phone's main
- *    processor wakes only every 10–15 s to receive a whole batch. Matching works on the batch
- *    because every fix carries its own timestamp.
+ * Like Google Maps and Waze, positions come from Google's *fused location provider* (Play services):
+ * satellites combined with Wi-Fi, cell and motion sensors, with its own power management and reliable
+ * batching. Phones without Play services use Android's own location service the same way.
+ *
+ *  - Moving: on foot every 3 s, by car every 2 s.
+ *  - Standing: the phone's activity recognition ([Motion], low-power sensor chip) reports "still" →
+ *    after ~20 s without GPS movement the GPS is switched OFF. Without activity recognition: throttled
+ *    after ~30 s, off after ~2.5 min (~40 s at a place where you often stand, [de.foggymap.app.core.RestSpots]).
+ *    While off only free sources are used (positions other apps request anyway, a cheap Wi-Fi/cell fix);
+ *    activity recognition and the hardware "significant motion" sensor wake GPS as soon as you move off.
+ *    Without activity recognition a short single GPS fix every ~1.5 min catches rides the motion sensor
+ *    misses.
+ *  - No GPS signal for minutes (indoors, underground) → also off instead of letting the receiver search.
+ *  - Screen off and nobody watching you live → positions are *batched*: the phone's main processor wakes
+ *    only every 20–30 s for a whole batch (every fix keeps its own time, matching works the same).
  */
 class LocationController(private val context: Context, private val onLocations: (List<Location>) -> Unit) {
     enum class Profile(val label: String) {
-        FAST("GPS aktiv (Fahrt)"), MOVING("GPS aktiv"), SLOW("GPS gedrosselt (kurzer Halt)"), STILL("GPS-Pause (Stillstand)")
+        FAST("GPS aktiv (Fahrt)"), MOVING("GPS aktiv"), SLOW("GPS gedrosselt (kurzer Halt)"), STILL("GPS aus (du stehst)")
     }
 
-    private val lm = context.getSystemService(LocationManager::class.java)
     private val sensors = context.getSystemService(SensorManager::class.java)
     private val main = Handler(Looper.getMainLooper())
     private var profile: Profile? = null
     private var screenOn = true
     /** Paused at a place where you often stand: check less often. */
     var atKnownPlace = false
+    /** Activity recognition is running: no GPS probes needed while standing. */
+    var motionAware = false
     /**
-     * Live position shared with the group (explicitly switched on): no batching, so friends see you move
-     * every 2–3 s also with the screen off. Costs some battery – that is the price of "live".
+     * Live position shared with a group member who is looking right now: no batching, so they see you
+     * move every 2–3 s also with your screen off.
      */
     var liveMode = false
         set(v) { if (field != v) { field = v; profile?.let { apply(it, force = true) } } }
-    private var subscribed = false
     var onSignificantMotion: (() -> Unit)? = null
 
     /** Hardware batching is not reliable on every device (and not at all on the emulator). */
@@ -58,38 +67,165 @@ class LocationController(private val context: Context, private val onLocations: 
     private var batchDelayMs = 0L
     private var lastDelivery = android.os.SystemClock.elapsedRealtime()
 
-    private val listener = object : LocationListenerCompat {
-        override fun onLocationChanged(location: Location) { lastDelivery = android.os.SystemClock.elapsedRealtime(); onLocations(listOf(location)) }
-        override fun onLocationChanged(locations: MutableList<Location>) { lastDelivery = android.os.SystemClock.elapsedRealtime(); onLocations(locations.toList()) }
-        override fun onProviderEnabled(provider: String) {}
-        override fun onProviderDisabled(provider: String) {}
+    private fun deliver(list: List<Location>) {
+        if (list.isEmpty()) return
+        lastDelivery = android.os.SystemClock.elapsedRealtime()
+        onLocations(list)
     }
 
-    private val passive = object : LocationListenerCompat {
-        override fun onLocationChanged(location: Location) = onLocations(listOf(location))
-        override fun onProviderEnabled(provider: String) {}
-        override fun onProviderDisabled(provider: String) {}
+    /** Where positions come from: Google's fused provider when available, otherwise Android's LocationManager. */
+    private interface Engine {
+        val name: String
+        fun request(p: Params, batchMs: Long): Boolean
+        fun remove()
+        /** Positions other apps request anyway (costs nothing). */
+        fun passive(on: Boolean)
+        /** One single satellite fix (used while standing without activity recognition). */
+        fun probe(onFix: (Location) -> Unit)
+        fun cancelProbe()
     }
-    private var passiveOn = false
-    private var probeSignal: android.os.CancellationSignal? = null
-    private val probe = object : Runnable {
-        @SuppressLint("MissingPermission")
-        override fun run() {
-            if (profile != Profile.STILL) return
-            probeSignal?.cancel()
+
+    private val engine: Engine = if (Motion.playServices(context)) GmsEngine() else PlatformEngine()
+    val engineName get() = engine.name
+
+    @SuppressLint("MissingPermission")
+    private inner class GmsEngine : Engine {
+        override val name = "Google Fused Location"
+        private val client = LocationServices.getFusedLocationProviderClient(context)
+        private var active = false
+        private var passiveOn = false
+        private val callback = object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) = deliver(result.locations)
+        }
+        private val passiveCallback = object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) = onLocations(result.locations)
+        }
+        private var probeToken: com.google.android.gms.tasks.CancellationTokenSource? = null
+
+        override fun request(p: Params, batchMs: Long): Boolean = try {
+            val req = LocationRequest.Builder(p.priority, p.interval)
+                .setMinUpdateIntervalMillis(p.interval / 2)
+                .setMinUpdateDistanceMeters(p.minDistance)
+                .setMaxUpdateDelayMillis(batchMs)
+                .setWaitForAccurateLocation(false)
+                .build()
+            client.requestLocationUpdates(req, callback, Looper.getMainLooper())
+            active = true; true
+        } catch (_: SecurityException) { false } catch (_: Exception) { false }
+
+        override fun remove() { if (active) runCatching { client.removeLocationUpdates(callback) }; active = false }
+
+        override fun passive(on: Boolean) {
+            if (on == passiveOn) return
+            passiveOn = on
+            try {
+                if (on) client.requestLocationUpdates(LocationRequest.Builder(Priority.PRIORITY_PASSIVE, 10_000)
+                    .setMinUpdateDistanceMeters(10f).build(), passiveCallback, Looper.getMainLooper())
+                else client.removeLocationUpdates(passiveCallback)
+            } catch (_: Exception) { passiveOn = false }
+        }
+
+        override fun probe(onFix: (Location) -> Unit) {
+            cancelProbe()
+            val token = com.google.android.gms.tasks.CancellationTokenSource().also { probeToken = it }
+            try {
+                client.getCurrentLocation(CurrentLocationRequest.Builder().setPriority(Priority.PRIORITY_HIGH_ACCURACY)
+                    .setDurationMillis(25_000).setMaxUpdateAgeMillis(5_000).build(), token.token)
+                    .addOnSuccessListener { loc -> if (loc != null) onFix(loc) }
+            } catch (_: Exception) { }
+        }
+
+        override fun cancelProbe() { probeToken?.cancel(); probeToken = null }
+    }
+
+    @SuppressLint("MissingPermission")
+    private inner class PlatformEngine : Engine {
+        override val name = "Android-Standort"
+        private val lm = context.getSystemService(LocationManager::class.java)
+        private var active = false
+        private var passiveOn = false
+        private var probeSignal: android.os.CancellationSignal? = null
+        private val listener = object : LocationListenerCompat {
+            override fun onLocationChanged(location: Location) = deliver(listOf(location))
+            override fun onLocationChanged(locations: MutableList<Location>) = deliver(locations.toList())
+            override fun onProviderEnabled(provider: String) {}
+            override fun onProviderDisabled(provider: String) {}
+        }
+        private val passiveListener = object : LocationListenerCompat {
+            override fun onLocationChanged(location: Location) = onLocations(listOf(location))
+            override fun onProviderEnabled(provider: String) {}
+            override fun onProviderDisabled(provider: String) {}
+        }
+
+        override fun request(p: Params, batchMs: Long): Boolean {
+            val quality = when (p.priority) {
+                Priority.PRIORITY_HIGH_ACCURACY -> LocationRequestCompat.QUALITY_HIGH_ACCURACY
+                Priority.PRIORITY_BALANCED_POWER_ACCURACY -> LocationRequestCompat.QUALITY_BALANCED_POWER_ACCURACY
+                else -> LocationRequestCompat.QUALITY_LOW_POWER
+            }
+            val request = LocationRequestCompat.Builder(p.interval).setQuality(quality).setMinUpdateDistanceMeters(p.minDistance)
+                .setMinUpdateIntervalMillis(p.interval / 2).setMaxUpdateDelayMillis(batchMs).build()
+            val provider = providerFor(p.priority != Priority.PRIORITY_HIGH_ACCURACY)
+            return try {
+                LocationManagerCompat.requestLocationUpdates(lm, provider, request, ContextCompat.getMainExecutor(context), listener)
+                active = true; true
+            } catch (_: SecurityException) { false } catch (_: IllegalArgumentException) {
+                try {
+                    LocationManagerCompat.requestLocationUpdates(lm, LocationManager.GPS_PROVIDER, request, ContextCompat.getMainExecutor(context), listener)
+                    active = true; true
+                } catch (_: Exception) { false }
+            }
+        }
+
+        override fun remove() { if (active) runCatching { LocationManagerCompat.removeUpdates(lm, listener) }; active = false }
+
+        override fun passive(on: Boolean) {
+            if (on == passiveOn) return
+            passiveOn = on
+            try {
+                if (on) LocationManagerCompat.requestLocationUpdates(lm, LocationManager.PASSIVE_PROVIDER,
+                    LocationRequestCompat.Builder(10_000).setMinUpdateDistanceMeters(10f).build(), ContextCompat.getMainExecutor(context), passiveListener)
+                else LocationManagerCompat.removeUpdates(lm, passiveListener)
+            } catch (_: Exception) { passiveOn = false }
+        }
+
+        override fun probe(onFix: (Location) -> Unit) {
+            cancelProbe()
             val signal = android.os.CancellationSignal().also { probeSignal = it }
             try {
-                LocationManagerCompat.getCurrentLocation(lm, LocationManager.GPS_PROVIDER, signal,
-                    ContextCompat.getMainExecutor(context), androidx.core.util.Consumer<Location> { loc ->
-                        if (loc != null && profile == Profile.STILL) onLocations(listOf(loc))
-                    })
+                LocationManagerCompat.getCurrentLocation(lm, LocationManager.GPS_PROVIDER, signal, ContextCompat.getMainExecutor(context),
+                    androidx.core.util.Consumer<Location> { loc -> if (loc != null) onFix(loc) })
                 main.postDelayed({ signal.cancel() }, 25_000)
             } catch (_: Exception) { }
+        }
+
+        override fun cancelProbe() { probeSignal?.cancel(); probeSignal = null }
+
+        private fun providerFor(lowPower: Boolean): String {
+            val gps = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
+            val network = runCatching { lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(false)
+            val fused = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && lm.allProviders.contains(LocationManager.FUSED_PROVIDER)
+            return when {
+                lowPower && fused -> LocationManager.FUSED_PROVIDER
+                lowPower && network -> LocationManager.NETWORK_PROVIDER
+                fused && gps -> LocationManager.FUSED_PROVIDER
+                gps -> LocationManager.GPS_PROVIDER
+                fused -> LocationManager.FUSED_PROVIDER
+                else -> LocationManager.GPS_PROVIDER
+            }
+        }
+    }
+
+    private var subscribed = false
+    private val probe = object : Runnable {
+        override fun run() {
+            if (profile != Profile.STILL || motionAware) return
+            engine.probe { loc -> if (profile == Profile.STILL) onLocations(listOf(loc)) }
             main.postDelayed(this, probeInterval())
         }
     }
 
-    private fun probeInterval(): Long = if (atKnownPlace) 90_000 else 45_000
+    private fun probeInterval(): Long = if (atKnownPlace) 150_000 else 90_000
 
     private val motion = object : TriggerEventListener() {
         override fun onTrigger(event: TriggerEvent?) { main.post { onSignificantMotion?.invoke() } }
@@ -97,14 +233,13 @@ class LocationController(private val context: Context, private val onLocations: 
 
     val current get() = profile
 
-    fun configure(screenOn: Boolean) {
+    @Synchronized fun configure(screenOn: Boolean) {
         val changed = screenOn != this.screenOn
         this.screenOn = screenOn
         if (changed) profile?.let { apply(it, force = true) }
     }
 
-    @SuppressLint("MissingPermission")
-    fun apply(p: Profile, force: Boolean = false) {
+    @Synchronized fun apply(p: Profile, force: Boolean = false) {
         if (p == profile && !force && subscribed) return
         profile = p
         stopUpdates()
@@ -112,48 +247,21 @@ class LocationController(private val context: Context, private val onLocations: 
         val batch = if (batchingAllowed && !screenOn && !liveMode && p != Profile.STILL) params.interval * params.batchFactor else 0L
         batchDelayMs = batch
         lastDelivery = android.os.SystemClock.elapsedRealtime()
-        val request = LocationRequestCompat.Builder(params.interval)
-            .setQuality(params.quality)
-            .setMinUpdateDistanceMeters(params.minDistance)
-            .setMinUpdateIntervalMillis(params.interval / 2)
-            .setMaxUpdateDelayMillis(batch)
-            .build()
-        val provider = providerFor(p)
-        try {
-            LocationManagerCompat.requestLocationUpdates(lm, provider, request, ContextCompat.getMainExecutor(context), listener)
-            subscribed = true
-        } catch (_: SecurityException) { subscribed = false } catch (_: IllegalArgumentException) {
-            // Provider missing on this device – fall back to GPS.
-            try {
-                LocationManagerCompat.requestLocationUpdates(lm, LocationManager.GPS_PROVIDER, request, ContextCompat.getMainExecutor(context), listener)
-                subscribed = true
-            } catch (_: Exception) { subscribed = false }
-        }
+        // While standing the GPS is OFF: only free sources (other apps' positions) – plus a cheap Wi-Fi/cell
+        // fix once a minute when there is no activity recognition to tell that you move off.
+        subscribed = if (p == Profile.STILL && motionAware) false else engine.request(params, batch)
         if (p == Profile.STILL || p == Profile.SLOW) armMotionSensor() else disarmMotionSensor()
         if (p == Profile.STILL) {
-            startPassive()
+            engine.passive(true)
             main.removeCallbacks(probe)
-            main.postDelayed(probe, probeInterval())
-        } else {
-            stopStillHelpers()
-        }
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun startPassive() {
-        if (passiveOn) return
-        try {
-            LocationManagerCompat.requestLocationUpdates(lm, LocationManager.PASSIVE_PROVIDER,
-                LocationRequestCompat.Builder(10_000).setMinUpdateDistanceMeters(10f).build(),
-                ContextCompat.getMainExecutor(context), passive)
-            passiveOn = true
-        } catch (_: Exception) { }
+            if (!motionAware) main.postDelayed(probe, probeInterval())
+        } else stopStillHelpers()
     }
 
     private fun stopStillHelpers() {
         main.removeCallbacks(probe)
-        probeSignal?.cancel(); probeSignal = null
-        if (passiveOn) { runCatching { LocationManagerCompat.removeUpdates(lm, passive) }; passiveOn = false }
+        engine.cancelProbe()
+        engine.passive(false)
     }
 
     /**
@@ -161,16 +269,16 @@ class LocationController(private val context: Context, private val onLocations: 
      * batch period, the device's batching is broken: switch it off for good and re-subscribe.
      * Returns true when batching was disabled.
      */
-    fun checkBatchingStall(): Boolean {
+    @Synchronized fun checkBatchingStall(): Boolean {
         if (batchDelayMs <= 0 || profile == null || profile == Profile.STILL) return false
         val silent = android.os.SystemClock.elapsedRealtime() - lastDelivery
-        if (silent < maxOf(60_000L, batchDelayMs * 3)) return false
+        if (silent < maxOf(90_000L, batchDelayMs * 3)) return false
         batchingAllowed = false
         profile?.let { apply(it, force = true) }
         return true
     }
 
-    fun stop() {
+    @Synchronized fun stop() {
         stopUpdates()
         stopStillHelpers()
         disarmMotionSensor()
@@ -179,6 +287,7 @@ class LocationController(private val context: Context, private val onLocations: 
 
     @SuppressLint("MissingPermission")
     fun lastKnown(): Location? = try {
+        val lm = context.getSystemService(LocationManager::class.java)
         listOfNotNull(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) LocationManager.FUSED_PROVIDER else null)
             .mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
@@ -186,42 +295,26 @@ class LocationController(private val context: Context, private val onLocations: 
     } catch (_: SecurityException) { null }
 
     private fun stopUpdates() {
-        if (subscribed) LocationManagerCompat.removeUpdates(lm, listener)
+        if (subscribed) engine.remove()
         subscribed = false
-    }
-
-    private fun providerFor(p: Profile): String {
-        val gps = lm.isProviderEnabled(LocationManager.GPS_PROVIDER)
-        val network = runCatching { lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER) }.getOrDefault(false)
-        val fused = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && lm.allProviders.contains(LocationManager.FUSED_PROVIDER)
-        // The fused provider (Android 12+) combines satellites with Wi-Fi, cell and motion sensors – noticeably
-        // steadier and closer to the truth between tall buildings than raw GPS. With high accuracy it still
-        // uses the satellites; without it (or with GPS off) we fall back to plain GPS.
-        return when {
-            p == Profile.STILL && fused -> LocationManager.FUSED_PROVIDER
-            p == Profile.STILL && network -> LocationManager.NETWORK_PROVIDER
-            fused && gps -> LocationManager.FUSED_PROVIDER
-            gps -> LocationManager.GPS_PROVIDER
-            fused -> LocationManager.FUSED_PROVIDER
-            else -> LocationManager.GPS_PROVIDER
-        }
     }
 
     /** One fresh, accurate position right now (no need to walk first). */
     fun pingNow(onFix: (Location) -> Unit) = currentLocation(context, onFix)
 
-    private data class Params(val interval: Long, val minDistance: Float, val quality: Int, val batchFactor: Long)
+    private data class Params(val interval: Long, val minDistance: Float, val priority: Int, val batchFactor: Long)
 
     // GPS stays switched on between fixes shorter than ~10 s anyway, so rarer fixes while moving save little
-    // energy but leave gaps (short streets passed by car got no fix). Savings come from batching (fewer
-    // wake-ups of the main processor), throttling during short stops and pausing during long ones.
+    // energy but leave gaps (short streets passed by car got no fix). Savings come from switching the GPS
+    // off while you stand, and from batching (fewer wake-ups of the main processor) with the screen off.
     // No minimum distance while GPS is on: fixes keep coming while you stand, which is how standing still
     // is recognised (and a silent receiver really means "no signal" or broken batching).
     private fun params(p: Profile): Params = when (p) {
-        Profile.FAST -> Params(2000, 0f, LocationRequestCompat.QUALITY_HIGH_ACCURACY, 6)
-        Profile.MOVING -> Params(3000, 0f, LocationRequestCompat.QUALITY_HIGH_ACCURACY, 5)
-        Profile.SLOW -> Params(10_000, 0f, LocationRequestCompat.QUALITY_HIGH_ACCURACY, 3)
-        Profile.STILL -> Params(30_000, 30f, LocationRequestCompat.QUALITY_LOW_POWER, 1)
+        Profile.FAST -> Params(2000, 0f, Priority.PRIORITY_HIGH_ACCURACY, 10)
+        Profile.MOVING -> Params(3000, 0f, Priority.PRIORITY_HIGH_ACCURACY, 10)
+        Profile.SLOW -> Params(10_000, 0f, Priority.PRIORITY_HIGH_ACCURACY, 3)
+        // No satellites: Wi-Fi/cell at most once a minute, and only when you moved 50 m.
+        Profile.STILL -> Params(60_000, 50f, Priority.PRIORITY_BALANCED_POWER_ACCURACY, 1)
     }
 
     private fun armMotionSensor() {
@@ -241,6 +334,15 @@ class LocationController(private val context: Context, private val onLocations: 
          */
         @SuppressLint("MissingPermission")
         fun currentLocation(context: Context, onFix: (Location) -> Unit) {
+            if (Motion.playServices(context)) {
+                try {
+                    LocationServices.getFusedLocationProviderClient(context).getCurrentLocation(
+                        CurrentLocationRequest.Builder().setPriority(Priority.PRIORITY_HIGH_ACCURACY).setDurationMillis(30_000)
+                            .setMaxUpdateAgeMillis(3_000).build(), null)
+                        .addOnSuccessListener { loc -> if (loc != null) onFix(loc) }
+                    return
+                } catch (_: SecurityException) { return } catch (_: Exception) { }
+            }
             val lm = context.getSystemService(LocationManager::class.java) ?: return
             val executor = ContextCompat.getMainExecutor(context)
             val signal = android.os.CancellationSignal()

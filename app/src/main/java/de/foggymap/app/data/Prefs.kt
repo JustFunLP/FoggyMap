@@ -80,9 +80,15 @@ class Prefs(context: Context) {
         set(v) = p.edit().putBoolean("resume_after_update", v).apply()
 
     /** Set automatically when hardware location batching turned out to lose fixes on this device. */
+    /** Batching delivered nothing on this phone. New key since Google's fused provider: it gets a fresh chance. */
     var batchingUnreliable: Boolean
-        get() = p.getBoolean("batching_unreliable", false)
-        set(v) = p.edit().putBoolean("batching_unreliable", v).apply()
+        get() = p.getBoolean("batching_unreliable_fused", false)
+        set(v) = p.edit().putBoolean("batching_unreliable_fused", v).apply()
+
+    /** The question about activity recognition ("Körperliche Aktivität") was shown once. */
+    var motionAsked: Boolean
+        get() = p.getBoolean("motion_asked", false)
+        set(v) = p.edit().putBoolean("motion_asked", v).apply()
 
     var perspective: Boolean
         get() = p.getBoolean("perspective", true)

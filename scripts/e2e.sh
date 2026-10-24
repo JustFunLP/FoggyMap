@@ -26,6 +26,8 @@ adb shell settings put global anr_show_background 0 || true
 adb install -r -g out/FoggyMap-debug.apk
 adb shell pm grant $PKG android.permission.ACCESS_FINE_LOCATION || true
 adb shell pm grant $PKG android.permission.POST_NOTIFICATIONS || true
+# Activity recognition (Play services, like Google Maps): GPS off while standing.
+adb shell pm grant $PKG android.permission.ACTIVITY_RECOGNITION || true
 adb logcat -G 16M || true
 adb logcat -c
 
@@ -132,6 +134,10 @@ summary.append(f"App-Absturz im Log: {'JA' if crash else 'nein'}")
 import re
 profiles = re.findall(r"gps profile -> (\w+)", "\n".join(log))
 summary.append("GPS-Stufen: " + (" → ".join(profiles[-8:]) if profiles else "keine Wechsel"))
+src = [l.split("FoggyMap: ")[-1] for l in log if "FoggyMap: location source:" in l]
+if src: summary.append("Standortdienst: " + src[-1].replace("location source: ", ""))
+motion = [l.split("FoggyMap: ")[-1] for l in log if "FoggyMap: motion" in l]
+summary.append("Bewegungserkennung: " + ("; ".join(motion[-4:]) if motion else "keine Meldung"))
 fog_updates = sum(1 for l in log if "fog updated" in l)
 summary.append(f"Nebel-Aktualisierungen der Karte: {fog_updates}")
 counts = {}

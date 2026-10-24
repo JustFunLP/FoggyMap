@@ -31,11 +31,18 @@ object WindowTexture {
     /** Soft window edges (map pixels). */
     private const val BLUR = 1.0f
 
-    fun create(pixelRatio: Int, seed: Long = 11): Bitmap {
-        val pr = pixelRatio.coerceIn(1, 4)
-        val bmp = Bitmap.createBitmap((W * pr).toInt(), (H * pr).toInt(), Bitmap.Config.ARGB_8888)
+    /**
+     * [pixelRatio] of the screen, [scale] = size on screen relative to 32 × 24 (one picture per zoom level,
+     * twice as large per level, so the windows keep their size on the facade while you zoom).
+     * Small levels get at least ~12 pixels per window so they still show windows, not mush.
+     */
+    fun create(pixelRatio: Float, scale: Float = 1f, seed: Long = 11): Bitmap {
+        val cssW = W * scale; val cssH = H * scale
+        val pr = maxOf(pixelRatio.coerceIn(1f, 4f), 24f / cssW)
+        val pw = Math.round(cssW * pr).coerceAtLeast(2); val ph = Math.round(cssH * pr).coerceAtLeast(2)
+        val bmp = Bitmap.createBitmap(pw, ph, Bitmap.Config.ARGB_8888)
         val c = Canvas(bmp)
-        c.scale(pr.toFloat(), pr.toFloat())
+        c.scale(pw / W, ph / H)
         c.drawColor(WALL)
         val p = Paint().apply { isAntiAlias = true }
         val soft = Paint().apply { isAntiAlias = true; maskFilter = android.graphics.BlurMaskFilter(BLUR, android.graphics.BlurMaskFilter.Blur.NORMAL) }
@@ -56,7 +63,7 @@ object WindowTexture {
                 c.drawRect(RectF(w * cw + cw * 0.18f, f * fh + fh * 0.28f, w * cw + cw * 0.82f, f * fh + fh * 0.82f), soft)
             }
         }
-        bmp.density = 160 * pr      // MapLibre: pixel ratio = density / 160
+        bmp.density = Math.round(160f * pw / cssW).coerceAtLeast(1)      // MapLibre: pixel ratio = density / 160
         return bmp
     }
 }

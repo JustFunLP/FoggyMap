@@ -58,7 +58,7 @@ fun FogMapView(modifier: Modifier, topInsetPx: Int, onReady: (FogMapController) 
             map.setMinZoomPreference(2.5)
             map.setMaxZoomPreference(19.5)
             map.setStyle(Style.Builder().fromUri("asset://style.json")) { style ->
-                val controller = FogMapController(context, map, style)
+                val controller = FogMapController(context, map, style, mapView)
                 controller.install()
                 ready.value(controller)
             }

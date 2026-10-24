@@ -6,7 +6,9 @@ import android.graphics.Color
 import androidx.core.graphics.drawable.toBitmap
 import android.location.Location
 import android.view.animation.DecelerateInterpolator
-import android.view.animation.LinearInterpolator
+import de.foggymap.app.core.RoadSnapper
+import kotlin.math.roundToInt
+import kotlinx.coroutines.flow.first
 import de.foggymap.app.App
 import de.foggymap.app.R
 import de.foggymap.app.core.FogBuilder
@@ -102,19 +104,24 @@ import org.maplibre.android.style.sources.GeoJsonSource
  * Revealed buildings stand *above* the fog, so their facades are never cut off by it, while
  * unrevealed buildings are simply not part of the 3D layer.
  */
-class FogMapController(private val context: Context, private val map: MapLibreMap, private val style: Style) {
+class FogMapController(private val context: Context, private val map: MapLibreMap, private val style: Style,
+                       private val mapView: org.maplibre.android.maps.MapView? = null) {
     private var fog: FogBuilder? = null
     private var lastSeq = 0L
     /** Refreshes run in their own scope and are conflated: a burst of reveals never cancels a running rebuild. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val pending = Channel<LatLon?>(Channel.CONFLATED)
-    private var breathing: ValueAnimator? = null
     private var revealAnim: ValueAnimator? = null
+    /** The map is on screen (app in front). Nothing is drawn or recalculated while it is not. */
+    private val onScreen = kotlinx.coroutines.flow.MutableStateFlow(false)
+    private var lastRefreshAt = 0L
     var animationsEnabled = true
     var onTrackingDismissed: (() -> Unit)? = null
 
     fun install() {
-        style.addImage(IMG_CLOUDS, FogTexture.create())
+        installPatterns()
+        // Battery: at most 30 frames per second (60 only while your fingers move the map).
+        setMaxFps(30)
         val empty = FogBuilder.EMPTY
         val worldFog = FogBuilder(51.0).fogGeoJson(0.0)
         for (id in listOf(SRC_FOG_A, SRC_FOG_B, SRC_FOG_C)) addSource(id, worldFog, tolerance = 0.2f)
@@ -128,7 +135,8 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         add(FillLayer(L_FOG_A, SRC_FOG_A).withProperties(fillColor(FOG), fillOpacity(0.50f), fillAntialias(true)))
         add(FillLayer(L_FOG_B, SRC_FOG_B).withProperties(fillColor(FOG), fillOpacity(0.55f), fillAntialias(true)))
         add(FillLayer(L_FOG_C, SRC_FOG_C).withProperties(fillColor(FOG), fillOpacity(0.78f), fillAntialias(true)))
-        add(FillLayer(L_FOG_CLOUDS, SRC_FOG_C).withProperties(fillPattern(IMG_CLOUDS), fillOpacity(0.92f), fillAntialias(false)))
+        add(FillLayer(L_FOG_CLOUDS, SRC_FOG_C).withProperties(fillPattern(Expression.raw(FOG_PATTERN)),
+            fillOpacity(interpolate(linear(), zoom(), stop(10, 0.5f), stop(13, 0.92f))), fillAntialias(false)))
         // Streets shimmer faintly through the fog (same warm colour as on the map, much dimmer),
         // so you can see where streets are without the fog giving away the city.
         add(LineLayer(L_GHOST, "omt").withSourceLayer("transportation").withProperties(
@@ -146,15 +154,14 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
             lineWidth(interpolate(linear(), zoom(), stop(12, 1.2f), stop(18, 3.4f))), lineCap(Property.LINE_CAP_ROUND), lineJoin(Property.LINE_JOIN_ROUND)))
         // Revealed buildings in 3D as a night city: facades with lit windows, dark flat roofs on top.
         // Every building is at least ~8 m high, so houses without height data still read as 3D.
-        style.addImage(IMG_WINDOWS, WindowTexture.create(context.resources.displayMetrics.density.toInt().coerceAtLeast(1)))
-        add(FillExtrusionLayer(L_BLDG, SRC_BLDG).withProperties(fillExtrusionPattern(IMG_WINDOWS),
+        add(FillExtrusionLayer(L_BLDG, SRC_BLDG).withProperties(fillExtrusionPattern(Expression.raw(WINDOW_PATTERN)),
             fillExtrusionHeight(shownHeight()), fillExtrusionBase(get("mh")), fillExtrusionOpacity(1f),
             fillExtrusionVerticalGradient(true)).also { it.minZoom = 13.5f })
         add(FillExtrusionLayer(L_BLDG_ROOF, SRC_BLDG).withProperties(fillExtrusionColor(ROOF),
             // The roof slab starts exactly where the facade ends: no overlapping walls, so nothing z-fights (flickers).
             fillExtrusionHeight(sum(shownHeight(), literal(0.6f))), fillExtrusionBase(shownHeight()),
             fillExtrusionOpacity(1f), fillExtrusionVerticalGradient(false)).also { it.minZoom = 13.5f })
-        add(FillExtrusionLayer(L_BLDG_NEW, SRC_BLDG_NEW).withProperties(fillExtrusionPattern(IMG_WINDOWS),
+        add(FillExtrusionLayer(L_BLDG_NEW, SRC_BLDG_NEW).withProperties(fillExtrusionPattern(Expression.raw(WINDOW_PATTERN)),
             fillExtrusionHeight(literal(0f)), fillExtrusionBase(get("mh")), fillExtrusionOpacity(1f),
             fillExtrusionVerticalGradient(true)).also { it.minZoom = 13.5f })
         add(FillExtrusionLayer(L_BLDG_NEW_ROOF, SRC_BLDG_NEW).withProperties(fillExtrusionColor(ROOF),
@@ -162,7 +169,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
             fillExtrusionOpacity(1f), fillExtrusionVerticalGradient(false)).also { it.minZoom = 13.5f })
         // Reveal animation: fog dissolving over the new area, plus an expanding violet glow.
         add(FillLayer(L_DISSOLVE, SRC_FLASH).withProperties(fillColor(FOG), fillOpacity(0f)))
-        add(FillLayer(L_DISSOLVE_CLOUDS, SRC_FLASH).withProperties(fillPattern(IMG_CLOUDS), fillOpacity(0f)))
+        add(FillLayer(L_DISSOLVE_CLOUDS, SRC_FLASH).withProperties(fillPattern(Expression.raw(FOG_PATTERN)), fillOpacity(0f)))
         add(LineLayer(L_FLASH, SRC_FLASH).withProperties(lineColor(LAVENDER), lineOpacity(0f), lineBlur(4f), lineWidth(2f)))
         // Group members who share their live position: a walking figure, its viewing cone and the name.
         // Figures at most at pixel ratio 3: 176 pictures stay small in memory and still look sharp.
@@ -179,8 +186,43 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
             textOffset(arrayOf(0f, 0.5f)), textAllowOverlap(true), textIgnorePlacement(true)))
         setBuildingsVisible(App.prefs.buildings3d)
         installPuck()
-        scope.launch { for (hint in pending) runCatching { refresh(hint) }.onFailure { android.util.Log.e(TAG, "fog refresh failed", it) } }
+        // Fog updates: only while the map is on screen, at most every few seconds (a reveal burst is merged).
+        scope.launch {
+            for (hint in pending) {
+                onScreen.first { it }
+                val wait = lastRefreshAt + MIN_REFRESH_GAP_MS - android.os.SystemClock.elapsedRealtime()
+                if (wait > 0) kotlinx.coroutines.delay(wait)
+                lastRefreshAt = android.os.SystemClock.elapsedRealtime()
+                runCatching { refresh(hint) }.onFailure { android.util.Log.e(TAG, "fog refresh failed", it) }
+            }
+        }
     }
+
+    /**
+     * Fog clouds and lit windows keep their size on the ground while you zoom. MapLibre draws a pattern at a
+     * fixed screen size per whole zoom level (so it used to shrink by half at every level); here every level
+     * gets its own picture at twice the size of the previous one, chosen with a zoom step. The feature lookup
+     * in the expression makes MapLibre load the pictures of the neighbouring levels with every tile, so the
+     * right one is always there.
+     */
+    private fun installPatterns() {
+        val pr = context.resources.displayMetrics.density.coerceIn(1f, 3f)
+        for (z in WIN_LEVELS) style.addImage("$IMG_WINDOWS-$z", WindowTexture.create(pr, Math.pow(2.0, (z - WIN_BASE_ZOOM).toDouble()).toFloat()))
+        val clouds = FogTexture.create()
+        val baseCss = clouds.width / pr               // size on screen at the reference zoom (as before)
+        for (z in FOG_LEVELS) {
+            val css = baseCss * Math.pow(2.0, (z - FOG_BASE_ZOOM).toDouble())
+            clouds.density = (160.0 * clouds.width / css).roundToInt().coerceAtLeast(1)   // MapLibre: pixel ratio = density / 160
+            style.addImage("$IMG_CLOUDS-$z", clouds)  // the pixels are copied right here, so one bitmap serves all levels
+        }
+    }
+
+    private fun setMaxFps(fps: Int) {
+        if (fps == currentMaxFps) return
+        currentMaxFps = fps
+        mapView?.let { v -> runCatching { v.setMaximumFps(fps) } }
+    }
+    private var currentMaxFps = 0
 
     /** Shown building height: at least 7 m (OpenMapTiles uses 5 m when OSM has no height), slightly exaggerated. */
     private fun shownHeight() = product(max(get("h"), literal(7f)), literal(1.15f))
@@ -210,7 +252,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
 
     fun dispose() {
         disposed = true
-        scope.cancel(); stopAmbient(); revealAnim?.cancel()
+        scope.cancel(); setOnScreen(false); revealAnim?.cancel()
         android.view.Choreographer.getInstance().removeFrameCallback(frameCallback)
     }
 
@@ -285,31 +327,33 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         }
     }
 
-    /** Slow "breathing" of the fog rim. Stopped while the app is in the background. */
-    fun startAmbient() {
-        visible = true
-        ensureTicker()
-        if (!animationsEnabled || breathing != null) return
-        val glow = style.getLayer(L_EDGE_GLOW) ?: return
-        var lastValue = -1f
-        breathing = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 3200
-            repeatMode = ValueAnimator.REVERSE
-            repeatCount = ValueAnimator.INFINITE
-            interpolator = LinearInterpolator()
-            addUpdateListener { a ->
-                val v = 0.25f + 0.25f * (a.animatedValue as Float)
-                if (kotlin.math.abs(v - lastValue) > 0.025f) { lastValue = v; glow.setProperties(lineOpacity(v)) }
-            }
-            start()
+    /**
+     * The map came on screen (app in front) or went away. While away nothing is drawn or recalculated –
+     * the newest position, friends, trail and fog are applied in one go when it comes back.
+     * (The fog rim no longer "breathes": that redrew the whole 3D map three times a second.)
+     */
+    fun setOnScreen(on: Boolean) {
+        visible = on
+        onScreen.value = on
+        if (!on) {
+            handler.removeCallbacks(ticker)
+            android.view.Choreographer.getInstance().removeFrameCallback(frameCallback); frameScheduled = false
+            return
         }
+        targetPos?.let { puckPos = it; glide = null }
+        pendingTrail?.let { updateTrail(it) }
+        lastFriendsJson = ""
+        renderFriends()
+        kick()
+        ensureTicker()
     }
 
-    fun stopAmbient() { breathing?.cancel(); breathing = null; visible = false; handler.removeCallbacks(ticker) }
+    /** Animations switched on/off in the menu. */
+    fun animationsChanged() { if (animationsEnabled) ensureTicker() else handler.removeCallbacks(ticker) }
 
     // ------------------------------------------------------------------ walking figures
     //
-    // You and your friends are little mannequins that walk on the spot while moving (8 frames, ~8 fps,
+    // You and your friends are little mannequins that walk on the spot while moving (8 frames, ~5–6 fps,
     // only while the map is on screen) and stand still otherwise. Side, back or front view follows the
     // walking direction relative to the screen.
 
@@ -333,7 +377,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
 
     private fun ensureTicker() {
         if (!visible || !animationsEnabled || disposed) return
-        if (meWalking() || friends.any { friendWalking(it) }) { handler.removeCallbacks(ticker); handler.postDelayed(ticker, 125) }
+        if (meWalking() || friends.any { friendWalking(it) }) { handler.removeCallbacks(ticker); handler.postDelayed(ticker, WALK_FRAME_MS) }
     }
 
     private fun tick() {
@@ -349,6 +393,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
     }
 
     private fun renderFriends() {
+        if (!visible) return
         val cam = map.cameraPosition.bearing
         val features = friends.map { f ->
             val walking = friendWalking(f) && animationsEnabled
@@ -425,8 +470,12 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         map.addOnCameraMoveListener { reportBearing() }
         map.addOnCameraIdleListener { reportBearing() }
         map.addOnCameraMoveStartedListener { reason ->
-            if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE && follow == Follow.FOLLOW) gestureActive = true
+            if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                setMaxFps(60)     // smooth under your fingers
+                if (follow == Follow.FOLLOW) gestureActive = true
+            }
         }
+        map.addOnCameraIdleListener { setMaxFps(30) }
         map.addOnCameraIdleListener {
             if (!gestureActive) return@addOnCameraIdleListener
             gestureActive = false
@@ -444,16 +493,51 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
     /** Kept for API symmetry with the permission flow; the own puck needs no activation. */
     fun enableLocation(): Boolean = true
 
+    /**
+     * A new position. While exploring it comes already put on your street ([App.snap], see RoadSnapper):
+     * then the figure glides along the street ahead at your speed until the next fix, instead of jumping
+     * from fix to fix – and it never steps back a few metres just because a fix came in late.
+     */
     fun updateLocation(loc: Location) {
         lastLoc = loc
-        if (loc.hasBearing() && loc.hasSpeed() && loc.speed > 3.0f) { course = loc.bearing.toDouble(); courseAt = android.os.SystemClock.elapsedRealtime() }
-        val t = LatLng(loc.latitude, loc.longitude)
+        val snap = App.snap.value?.takeIf { it.timeMs == loc.time && it.snapped }
+        val moving = loc.hasSpeed() && loc.speed > 0.8f
+        val roadBearing = snap?.bearing
+        if (moving && roadBearing != null && loc.speed > 1.2f) { course = roadBearing; courseAt = android.os.SystemClock.elapsedRealtime() }
+        else if (loc.hasBearing() && loc.hasSpeed() && loc.speed > 3.0f) { course = loc.bearing.toDouble(); courseAt = android.os.SystemClock.elapsedRealtime() }
+        val base = snap?.pos ?: LatLon(loc.latitude, loc.longitude)
+        val t = LatLng(base.lat, base.lon)
+        val prevGlide = glide
+        glide = if (snap != null && moving && snap.ahead.size >= 2 && animationsEnabled) {
+            val speed = loc.speed.toDouble().coerceAtMost(45.0)
+            // Where is the figure now, seen along the street ahead of the new fix? Slightly ahead (the fix came in
+            // late, or we predicted a bit too far): carry on from there instead of stepping back.
+            val shown = puckPos?.let { RoadSnapper.alongOffset(snap.ahead, LatLon(it.latitude, it.longitude)) }
+            val offset = if (shown != null && shown > 0 && shown < 10.0) shown else 0.0
+            Glide(snap.ahead, System.nanoTime(), speed, offset, minOf(RoadSnapper.length(snap.ahead), offset + speed * GLIDE_MAX_S))
+        } else null
+        // Just stopped: settle softly onto the standing position (no hop backwards).
+        settling = glide == null && prevGlide != null
         targetPos = t
         val first = puckPos == null
         if (first) puckPos = t
         updateHeading()
+        if (!visible) return
         if (first && follow == Follow.FOLLOW) startFollowing() else kick()
         ensureTicker()
+    }
+
+    private class Glide(val path: List<LatLon>, val startNs: Long, val speed: Double, val offset: Double, val maxAlong: Double)
+    private var glide: Glide? = null
+    private var settling = false
+    private var lastDrawNs = 0L
+
+    /** Where the figure should be right now: gliding along the street, or the latest position. */
+    private fun currentTarget(nowNs: Long): LatLng? {
+        val g = glide ?: return targetPos
+        val along = minOf(g.offset + g.speed * (nowNs - g.startNs) / 1e9, g.maxAlong)
+        val p = RoadSnapper.pointAlong(g.path, along)
+        return LatLng(p.lat, p.lon)
     }
 
     /** Compass azimuth (true north) from the phone's rotation sensor; null when not available. */
@@ -467,26 +551,31 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         val c = course
         val useCourse = c != null && android.os.SystemClock.elapsedRealtime() - courseAt < 20_000
         val h = (if (useCourse) c else compass ?: c) ?: return false
-        if (hasBearing && kotlin.math.abs(angleDelta(targetBearing, h)) < 1.5) return false   // ignore sensor jitter
+        // Ignore small changes: a shaking hand must not keep the whole 3D map turning (and drawing).
+        if (hasBearing && kotlin.math.abs(angleDelta(targetBearing, h)) < (if (useCourse) 1.5 else 3.0)) return false
         targetBearing = norm(h)
         if (!hasBearing) { puckBearing = targetBearing; hasBearing = true }
         return true
     }
 
     private fun kick() {
-        if (disposed || frameScheduled) return
+        if (disposed || frameScheduled || !visible) return
         frameScheduled = true
         android.view.Choreographer.getInstance().postFrameCallback(frameCallback)
     }
 
     private fun onFrame(nanos: Long) {
         frameScheduled = false
-        if (disposed) return
-        val target = targetPos ?: return
-        val dt = if (lastFrame == 0L) 0.016 else ((nanos - lastFrame) / 1e9).coerceIn(0.0, 0.1)
+        if (disposed || !visible) return
+        // At most ~30 updates per second (the map draws at most 30 frames anyway).
+        if (lastDrawNs != 0L && nanos - lastDrawNs < FRAME_NS) { kick(); return }
+        lastDrawNs = nanos
+        val target = currentTarget(System.nanoTime()) ?: return
+        val dt = if (lastFrame == 0L) 0.033 else ((nanos - lastFrame) / 1e9).coerceIn(0.0, 0.1)
         lastFrame = nanos
         val cur = puckPos ?: target
-        val kPos = if (animationsEnabled) 1 - kotlin.math.exp(-dt / 0.28) else 1.0
+        val tau = if (settling) 0.9 else if (glide != null) 0.22 else 0.28
+        val kPos = if (animationsEnabled) 1 - kotlin.math.exp(-dt / tau) else 1.0
         val kRot = if (animationsEnabled) 1 - kotlin.math.exp(-dt / 0.20) else 1.0
         val np = LatLng(cur.latitude + (target.latitude - cur.latitude) * kPos, cur.longitude + (target.longitude - cur.longitude) * kPos)
         val nb = norm(puckBearing + angleDelta(puckBearing, targetBearing) * kRot)
@@ -503,8 +592,11 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         }
         val dLat = (target.latitude - np.latitude) * 111_320
         val dLon = (target.longitude - np.longitude) * 111_320 * kotlin.math.cos(Math.toRadians(np.latitude))
-        val busy = dLat * dLat + dLon * dLon > 0.0025 || kotlin.math.abs(angleDelta(nb, targetBearing)) > 0.3
-        if (busy) kick() else lastFrame = 0L
+        val g = glide
+        val gliding = g != null && g.offset + g.speed * (System.nanoTime() - g.startNs) / 1e9 < g.maxAlong
+        // Close enough (10 cm, 0.3°): stop drawing until something changes.
+        val busy = gliding || dLat * dLat + dLon * dLon > 0.01 || kotlin.math.abs(angleDelta(nb, targetBearing)) > 0.3
+        if (busy) kick() else { lastFrame = 0L; lastDrawNs = 0L; settling = false }
     }
 
     private fun setPuck(p: LatLng, bearing: Double) {
@@ -609,7 +701,11 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
 
     // ------------------------------------------------------------------ light trail of your own path
 
+    private var pendingTrail: List<LatLon>? = null
+
     fun updateTrail(points: List<LatLon>) {
+        if (!visible) { pendingTrail = points; return }
+        pendingTrail = null
         val json = if (points.size < 2) FogBuilder.EMPTY else FogBuilder.featureCollection(listOf(
             FogBuilder.feature("{\"type\":\"LineString\",\"coordinates\":[" +
                 points.joinToString(",") { "[${Geo.round6(it.lon)},${Geo.round6(it.lat)}]" } + "]}", "")))
@@ -621,6 +717,25 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
 
     companion object {
         const val TAG = "FoggyMap"
+        /** Fog rebuilds at most this often while revealing (a burst of reveals is merged into one). */
+        const val MIN_REFRESH_GAP_MS = 4_000L
+        /** ~30 updates per second for the gliding figure / following camera. */
+        const val FRAME_NS = 32_000_000L
+        /** Walking figures: ~5–6 pictures per second. */
+        const val WALK_FRAME_MS = 180L
+        /** Gliding ahead of the last fix: at most this long (then wait for the next one). */
+        const val GLIDE_MAX_S = 4.0
+        // Pattern pictures per zoom level (see installPatterns).
+        val WIN_LEVELS = 14..19
+        const val WIN_BASE_ZOOM = 17
+        val FOG_LEVELS = 12..19
+        const val FOG_BASE_ZOOM = 16
+        /** Zoom step over the level pictures; the ["get"] makes MapLibre keep the neighbouring levels ready. */
+        private fun levelPattern(name: String, levels: IntRange): String {
+            val sb = StringBuilder("[\"step\",[\"zoom\"],[\"image\",[\"coalesce\",[\"get\",\"_pattern\"],\"$name-${levels.first}\"]]")
+            for (z in levels.first + 1..levels.last) sb.append(",$z,[\"image\",\"$name-$z\"]")
+            return sb.append("]").toString()
+        }
         const val FOG = "#080A17"
         const val VIOLET = "#8B5CF6"
         const val LAVENDER = "#C4B5FD"
@@ -644,6 +759,8 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         const val L_DISSOLVE = "reveal-dissolve"; const val L_DISSOLVE_CLOUDS = "reveal-dissolve-clouds"; const val L_FLASH = "reveal-flash"
         const val L_FRIENDS = "friends"; const val L_FRIENDS_LABEL = "friends-label"
         const val IMG_WINDOWS = "windows"; const val ROOF = "#1a1c38"
+        val WINDOW_PATTERN = levelPattern(IMG_WINDOWS, WIN_LEVELS)
+        val FOG_PATTERN = levelPattern("fog-clouds", FOG_LEVELS)
         const val L_BLDG_ROOF = "bldg-roof"; const val L_BLDG_NEW_ROOF = "bldg-new-roof"
         const val SRC_TRAIL = "trail"; const val L_TRAIL = "trail"
         const val SRC_ME = "me"; const val L_ME = "me-figure"; const val L_ME_CONE = "me-cone"; const val L_ME_ACC = "me-accuracy"

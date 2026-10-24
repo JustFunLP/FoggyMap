@@ -136,14 +136,33 @@ fun MainScreen(activity: MainActivity) {
         TrackingService.start(context)
         releasedByUser = false
     }
-    val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { startTracking() }
+    // Activity recognition (once, with a short explanation first): lets the GPS switch off while you stand.
+    var explainMotion by remember { mutableStateOf(false) }
+    val motionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { startTracking() }
+    fun askMotionThenStart() {
+        if (!App.prefs.motionAsked && de.foggymap.app.tracking.Motion.canAsk(context)) { App.prefs.motionAsked = true; explainMotion = true }
+        else startTracking()
+    }
+    if (explainMotion) androidx.compose.material3.AlertDialog(
+        onDismissRequest = { explainMotion = false; startTracking() },
+        title = { Text("Akku sparen wie Google Maps") },
+        text = { Text("Wenn du gleich „Körperliche Aktivität“ erlaubst, merkt dein Handy selbst, ob du stehst, gehst, Rad oder Auto fährst. " +
+            "Dann schaltet FoggyMap das GPS beim Stehen ganz aus und sofort wieder ein, wenn du losgehst. Rad und Auto werden besser erkannt. " +
+            "Das läuft auf dem stromsparenden Sensor-Chip und bleibt auf deinem Handy.") },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = {
+            explainMotion = false
+            if (Build.VERSION.SDK_INT >= 29) motionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION) else startTracking()
+        }) { Text("Weiter") } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = { explainMotion = false; startTracking() }) { Text("Ohne") } },
+    )
+    val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { askMotionThenStart() }
     val locationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
         when {
             MainActivity.hasFineLocation(context) -> {
                 locationEnabled = controller?.enableLocation() == true
                 if (Build.VERSION.SDK_INT >= 33 && !hasPermission(context, Manifest.permission.POST_NOTIFICATIONS))
                     notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                else startTracking()
+                else askMotionThenStart()
             }
             hasPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) -> permissionProblem =
                 "Du hast nur den ungefähren Standort erlaubt. FoggyMap braucht den genauen Standort, um zu erkennen, auf welcher Straße du gehst. " +
@@ -160,7 +179,7 @@ fun MainScreen(activity: MainActivity) {
         if (MainActivity.hasFineLocation(context)) {
             if (Build.VERSION.SDK_INT >= 33 && !hasPermission(context, Manifest.permission.POST_NOTIFICATIONS))
                 notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-            else startTracking()
+            else askMotionThenStart()
         } else locationLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
     }
 
@@ -221,7 +240,7 @@ fun MainScreen(activity: MainActivity) {
                 else { add(LocationManager.GPS_PROVIDER); add(LocationManager.NETWORK_PROVIDER) }
             }
             // High accuracy (satellites), not the default Wi-Fi/cell quality – the figure should stand where you stand.
-            val request = androidx.core.location.LocationRequestCompat.Builder(1000L)
+            val request = androidx.core.location.LocationRequestCompat.Builder(2000L)
                 .setQuality(androidx.core.location.LocationRequestCompat.QUALITY_HIGH_ACCURACY).setMinUpdateDistanceMeters(0f).build()
             for (pr in providers) runCatching {
                 androidx.core.location.LocationManagerCompat.requestLocationUpdates(lm, pr, request, androidx.core.content.ContextCompat.getMainExecutor(context), listener)
@@ -252,13 +271,13 @@ fun MainScreen(activity: MainActivity) {
         val obs = LifecycleEventObserver { _, e ->
             when (e) {
                 // Friends' live positions only while the map is on screen.
-                Lifecycle.Event.ON_RESUME -> { c?.startAmbient(); App.sync.requestSync(1_000); App.live.setListening(App.sync.state.value.inGroup) }
-                Lifecycle.Event.ON_PAUSE -> { c?.stopAmbient(); App.live.setListening(false) }
+                Lifecycle.Event.ON_RESUME -> { c?.setOnScreen(true); App.sync.requestSync(1_000); App.live.setListening(App.sync.state.value.inGroup) }
+                Lifecycle.Event.ON_PAUSE -> { c?.setOnScreen(false); App.live.setListening(false) }
                 else -> {}
             }
         }
         lifecycle.addObserver(obs)   // replays ON_RESUME if we are already resumed
-        onDispose { lifecycle.removeObserver(obs); c?.stopAmbient() }
+        onDispose { lifecycle.removeObserver(obs); c?.setOnScreen(false) }
     }
 
     val density = LocalDensity.current
@@ -301,7 +320,7 @@ fun MainScreen(activity: MainActivity) {
             onChanged = {
                 controller?.setBuildingsVisible(App.prefs.buildings3d)
                 controller?.animationsEnabled = App.prefs.fogAnimation
-                if (!App.prefs.fogAnimation) controller?.stopAmbient() else controller?.startAmbient()
+                controller?.animationsChanged()
                 TrackingService.settingsChanged(context)
             },
             onDataCleared = { activity.recreate() },

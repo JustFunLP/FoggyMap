@@ -125,6 +125,13 @@ object Diagnostics {
         line("Akku-Optimierung aus", c.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(c.packageName))
         line("Energiesparmodus", c.getSystemService(PowerManager::class.java)?.isPowerSaveMode)
         line("Hardware-Bündelung", if (prefs.batchingUnreliable) "abgeschaltet (lieferte nichts)" else "erlaubt")
+        line("Standortdienst", if (de.foggymap.app.tracking.Motion.playServices(c)) "Google Fused Location (Play-Dienste)" else "Android-Standort (ohne Play-Dienste)")
+        line("Bewegungserkennung", when {
+            !de.foggymap.app.tracking.Motion.playServices(c) -> "nicht verfügbar"
+            !de.foggymap.app.tracking.Motion.permitted(c) -> "nicht erlaubt"
+            de.foggymap.app.tracking.Motion.running -> "läuft · zuletzt ${de.foggymap.app.tracking.Motion.state.value?.mode ?: "–"}"
+            else -> "erlaubt"
+        })
 
         section("Einstellungen")
         line("Aufdecken", "${prefs.revealMode} · Breite ${prefs.stripWidth} m · Radius ${prefs.revealRadius} m")
@@ -133,7 +140,7 @@ object Diagnostics {
         line("Koop", if (!sync.inGroup) "keine Gruppe" else "in Gruppe (${sync.members.size} Mitglieder) über " +
             (if (App.sync.usesNostr) "Relays" else "eigenen Server") + " · Live-Standort ${prefs.shareLiveLocation}")
         if (sync.inGroup) line("Sync", "${sync.status} · ${clean(sync.message)} · zuletzt ${if (sync.lastSync > 0) stamp.format(Date(sync.lastSync)) else "nie"} · " +
-            "${sync.pendingUploads} warten · Live-Verbindungen ${App.live.connectedRelays}")
+            "${sync.pendingUploads} warten · Live-Verbindungen ${App.live.connectedRelays} · jemand schaut zu ${App.live.watched.value}")
         line("Abzeichen", App.badges.earned.value.joinToString { it.id }.ifEmpty { "keine" })
 
         section("Erkundung")

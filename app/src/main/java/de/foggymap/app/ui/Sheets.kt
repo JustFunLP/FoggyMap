@@ -101,6 +101,36 @@ internal fun FogSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.()
 
 // =================================================================== info (statistics + what GPS is doing)
 
+/** Activity recognition on/off, with a way to switch it on (it saves the most battery while standing). */
+@Composable
+private fun MotionLine() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var permitted by remember { mutableStateOf(de.foggymap.app.tracking.Motion.permitted(context)) }
+    val playServices = remember { de.foggymap.app.tracking.Motion.playServices(context) }
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
+        permitted = ok
+        if (ok) de.foggymap.app.tracking.TrackingService.settingsChanged(context)
+        else runCatching {   // asked before and declined: Android only lets the settings page switch it on now
+            context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                android.net.Uri.fromParts("package", context.packageName, null)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        }
+    }
+    val value = when {
+        !playServices -> "nicht verfügbar (ohne Google-Dienste)"
+        permitted -> "an · GPS geht beim Stehen aus"
+        else -> "aus"
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f)) {
+            InfoLine(painterResource(R.drawable.ic_auto_mode), "Bewegungserkennung", value, if (permitted && playServices) Fog.Success else Fog.Amber)
+        }
+        if (playServices && !permitted && android.os.Build.VERSION.SDK_INT >= 29) {
+            TextButton(onClick = { launcher.launch(android.Manifest.permission.ACTIVITY_RECOGNITION) }) { Text("Erlauben", color = Fog.Lavender) }
+        }
+    }
+}
+
 /** Everything that used to sit on the map: progress, this tour, GPS state, totals. */
 @Composable
 internal fun InfoTab(sync: SyncUi) {
@@ -152,10 +182,13 @@ internal fun InfoTab(sync: SyncUi) {
             if (tracking.loadingMap) InfoLine(painterResource(R.drawable.ic_cloud), "Karte", "lädt Straßen …", Fog.Cyan)
             tracking.message?.let { InfoLine(rememberVectorPainter(Icons.Filled.Info), "Hinweis", it, Fog.Amber) }
         }
+        MotionLine()
         Spacer(Modifier.height(8.dp))
-        Text("Es gibt keine GPS-Einstellungen: In Bewegung misst FoggyMap alle 2–3 Sekunden. Stehst du etwa 30 Sekunden, " +
-            "wird gedrosselt, nach 2,5 Minuten pausiert das GPS. An Orten, an denen du oft stehst (z. B. Zuhause), pausiert es schon nach 40 Sekunden. " +
-            "Diese Orte merkt sich nur dein Handy.", color = Fog.Muted, fontSize = 11.sp, lineHeight = 15.sp)
+        Text("Es gibt keine GPS-Einstellungen. Wie bei Google Maps und Waze kommt dein Standort vom Google-Standortdienst. " +
+            "In Bewegung misst FoggyMap alle 2–3 Sekunden. Merkt dein Handy, dass du stehst (Bewegungserkennung), geht das GPS nach " +
+            "etwa 20 Sekunden ganz aus und springt wieder an, sobald du losgehst. Ohne Bewegungserkennung wird nach 30 Sekunden " +
+            "gedrosselt und nach 2,5 Minuten ausgeschaltet (an Orten, an denen du oft stehst, schon nach 40 Sekunden). " +
+            "Das alles bleibt auf deinem Handy.", color = Fog.Muted, fontSize = 11.sp, lineHeight = 15.sp)
     }
 
     BatteryGpsCard()
@@ -207,7 +240,8 @@ private fun InfoLine(icon: Painter, label: String, value: String, tint: Color) {
     Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = tint, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(10.dp))
-        Text(label, fontSize = 13.sp, color = Fog.Muted, modifier = Modifier.width(118.dp))
+        Text(label, fontSize = 13.sp, color = Fog.Muted, modifier = Modifier.width(122.dp), style = androidx.compose.material3.LocalTextStyle.current.merge(Hyphenated))
+        Spacer(Modifier.width(8.dp))
         Text(value, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
     }
 }
@@ -347,7 +381,7 @@ internal fun CoopTab(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> U
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Live-Standort mit der Gruppe teilen", fontSize = 14.sp)
-                    Text("Aus = deine Position wird nie übertragen. An = während der Erkundung alle 2–3 Sekunden: deine Figur, deine Blickrichtung und was du gerade aufdeckst. Kostet etwas mehr Akku.",
+                    Text("Aus = deine Position wird nie übertragen. An = während der Erkundung deine Figur, deine Blickrichtung und was du gerade aufdeckst: alle 2–3 Sekunden, solange jemand aus der Gruppe die Karte offen hat, sonst alle 20 Sekunden (spart Akku).",
                         color = Fog.Muted, fontSize = 11.sp, lineHeight = 14.sp)
                 }
                 Switch(shareLive, { on ->
@@ -380,7 +414,7 @@ internal fun CoopTab(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> U
     if (confirmLive) AlertDialog(
         onDismissRequest = { confirmLive = false }, containerColor = Fog.Surface, titleContentColor = Fog.Text, textContentColor = Fog.Text,
         title = { Text("Live-Standort teilen?") },
-        text = { Text("Während die Erkundung läuft, sehen alle Gruppenmitglieder live, wo du bist und wohin du schaust (alle 2–3 Sekunden, verschlüsselt). Du kannst das jederzeit wieder ausschalten.") },
+        text = { Text("Während die Erkundung läuft, sehen alle Gruppenmitglieder live, wo du bist und wohin du schaust (alle 2–3 Sekunden, solange jemand die Karte offen hat; verschlüsselt). Du kannst das jederzeit wieder ausschalten.") },
         confirmButton = { TextButton(onClick = {
             confirmLive = false; shareLive = true; App.prefs.shareLiveLocation = true
             App.live.refresh(); de.foggymap.app.tracking.TrackingService.settingsChanged(context)

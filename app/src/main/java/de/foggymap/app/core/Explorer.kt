@@ -142,7 +142,8 @@ class Explorer(knownRoadIds: Collection<String>) {
         return Step(result, items.values.toList(), segs)
     }
 
-    private fun candidates(p: LatLon, radius: Double): List<Candidate> {
+    /** Streets near [p] (also used to put your figure on the street, see [RoadSnapper]). */
+    fun candidates(p: LatLon, radius: Double): List<Candidate> {
         val byId = HashMap<String, Candidate>()
         for (m in models.values) for (c in m.candidates(p, radius)) {
             if (vehicleOnly && !c.segment.roadClass.vehicular) continue

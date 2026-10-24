@@ -52,6 +52,13 @@ object Geo {
         return d
     }
 
+    /** Smallest difference between two directions, 0..180 degrees. */
+    fun angleDifference(a: Double, b: Double): Double {
+        var d = abs(a - b) % 360.0
+        if (d > 180.0) d = 360.0 - d
+        return d
+    }
+
     fun round6(v: Double) = round(v * 1e6) / 1e6
 }
 
