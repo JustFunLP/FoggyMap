@@ -39,7 +39,7 @@ Alles hier geht im Browser bzw. der GitHub-App auf dem Android-Handy. Ein PC ist
 - Ohne Internet läuft die Aufzeichnung weiter. Die Wege werden gespeichert und aufgedeckt, sobald die Kartendaten geladen werden können.
 - Samsung/Xiaomi/Huawei: Falls die Aufzeichnung im Hintergrund stoppt, Menü → App → *Akku-Optimierung* auf „Nicht eingeschränkt“ stellen.
 - Akku: Es gibt keine GPS-Einstellungen. Wie bei Google Maps und Waze kommt dein Standort vom Google-Standortdienst. In Bewegung misst FoggyMap alle 2–3 Sekunden. Beim ersten Start fragt die App einmal nach **„Körperliche Aktivität“**: Erlaubst du das, merkt dein Handy selbst, wann du stehst (meist nach einer halben bis ganzen Minute). Zeigt auch das GPS danach 20 Sekunden keine Bewegung, geht es ganz aus und springt an, sobald du losgehst (nachträglich: Menü → Info → Bewegungserkennung → *Erlauben*). Ohne diese Erlaubnis wird nach 30 Sekunden gedrosselt und nach 2,5 Minuten ausgeschaltet (an Orten, an denen du oft stehst, nach 40 Sekunden). Alles bleibt auf deinem Handy.
-- Deine Figur steht auf der Straße, auf der du gehst oder fährst, und gleitet zwischen den GPS-Positionen die Straße entlang, statt hin und her zu springen. Auf Plätzen und in Parks steht sie dort, wo das GPS dich sieht.
+- Deine Figur steht auf der Straße, auf der du gehst oder fährst, und gleitet zwischen den GPS-Positionen die Straße entlang, statt hin und her zu springen. Auf Plätzen und in Parks steht sie dort, wo das GPS dich sieht, im Zug auf den Gleisen.
 - Nebel-Wolken und Fenster behalten beim Zoomen ihre Größe auf dem Boden bzw. an der Fassade.
 
 ---

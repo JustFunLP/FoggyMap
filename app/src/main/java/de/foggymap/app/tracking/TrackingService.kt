@@ -226,11 +226,14 @@ class TrackingService : Service() {
     private fun snapForDisplay(ex: Explorer, l: Location): de.foggymap.app.core.RoadSnapper.Snap? {
         val p = LatLon(l.latitude, l.longitude)
         val manual = App.manualMode.value
-        // On a train you are not on a street; without map data there is nothing to snap to.
-        if (manual == TravelMode.TRAIN || (manual == null && tripMode.current() == TravelMode.TRAIN) || !ex.hasCell(CellKey.of(p))) {
-            snapper.reset(); return null
-        }
         val moving = l.hasSpeed() && l.speed > 0.8f
+        // Without map data there is nothing to snap to.
+        if (!ex.hasCell(CellKey.of(p))) { snapper.reset(); return null }
+        // On a train: on the tracks, not on a street.
+        if (manual == TravelMode.TRAIN || (manual == null && tripMode.current() == TravelMode.TRAIN)) {
+            snapper.reset()
+            return ex.railSnap(p, TRAIN_SNAP_M)?.let { de.foggymap.app.core.RoadSnapper.Snap(it, null, emptyList(), true, l.time, moving) }
+        }
         val heading = if (moving && l.hasBearing()) l.bearing.toDouble() else null
         val carOnly = manual == TravelMode.CAR || (l.hasSpeed() && l.speed > 9f)
         return snapper.snap(p, if (l.hasAccuracy()) l.accuracy.toDouble() else 25.0, heading, moving, l.time) { q, r ->
