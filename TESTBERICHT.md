@@ -1,6 +1,6 @@
 # FoggyMap – Testbericht
 
-Stand: 23.10.2026. Alle Ergebnisse stammen aus echten Läufen, die du jederzeit unter *Actions* im Repository nachprüfen kannst.
+Stand: 24.10.2026. Alle Ergebnisse stammen aus echten Läufen, die du jederzeit unter *Actions* im Repository nachprüfen kannst.
 
 ## ✅ Gebaut
 
@@ -14,7 +14,9 @@ Stand: 23.10.2026. Alle Ergebnisse stammen aus echten Läufen, die du jederzeit 
 
 ## ✅ Automatisch getestet
 
-**1. Kernlogik (79 Unit-Tests, laufen bei jedem Build)**
+**1. Kernlogik (93 Unit-Tests, laufen bei jedem Build)**
+- **Figur auf der Straße (neu, `RoadSnapper`):** GPS, das 7–8 m links und rechts neben die Straße springt, landet bei allen 21 Positionen auf der Mittellinie (Abweichung unter 0,3 m). Der Weg voraus ist 60 m lang und läuft geradeaus über die Kreuzung weiter. Direkt hinter einer Kreuzung bleibt die Figur auf ihrer Straße, obwohl die Querstraße näher ist (3 m gegen 9 m). Biegt man ab, übernimmt die Querstraße. Mitten im Block (50 m von jeder Straße) rastet nichts ein. Kein Hin-und-her am Rand: Erst ab 15 m Nähe einrasten, erst ab 23 m wieder lösen.
+- **Fortbewegung mit Aktivitätserkennung (neu):** Ein Auto im Stau (nie schneller als 25 km/h) zählt nach Tempo allein zu weniger als 50 % als Auto, mit der Meldung „Fahrzeug“ zu über 95 %. Ein gemütliches Rad mit 13 km/h wird mit der Meldung „Rad“ als Rad erkannt, ein Sprinter mit 18 km/h mit „zu Fuß“ als Fußgänger. Die Meldung „Rad“ bei Autobahntempo wird ignoriert.
 - Straßenaufteilung: Teilung an Kreuzungen, Fußwege teilen keine Straßen, Brücken bilden keine Kreuzung, Gehwege und Zufahrten werden ignoriert, lange Landstraßen werden gestückelt, die IDs sind kachelübergreifend stabil.
 - **Straßennetz aus Vektorkacheln (neu, ersetzt Overpass):** Mit künstlich erzeugten Kacheln (Schnitt an Kachelrändern, weggekürzte Kreuzungspunkte) und mit **echten OpenFreeMap-Kacheln** aus Odenthal (Dorf) und Berlin-Prenzlauer Berg, verglichen mit den Overpass-Daten derselben Gegend vom selben Tag:
   - 62 von 62 bzw. 65 von 65 echten Kreuzungen gefunden, keine Straße fehlt.
@@ -55,7 +57,7 @@ Der Build-Test spricht mit den echten Relays im Internet, nicht mit einer Attrap
 - **Relay-Prüfung:** 12 öffentliche Relays wurden getestet, ob sie 25-KB- und 50-KB-Pakete annehmen und wieder herausgeben. 7 schafften beides. Die App nutzt fünf davon: nos.lol, relay.primal.net, nostr.mom, relay.snort.social und nostr-pub.wellorder.net. Aussortiert: Relays, die nur „Web-of-Trust“-Nutzer annehmen, nicht erreichbare und eines, das Daten zwar annimmt, aber nicht zurückgibt.
 - **Zwei Mitglieder, echte Relays:** Anna erstellt eine Gruppe und veröffentlicht 540 Funde in 3 Paketen. Ben findet die Gruppe „CI-Gruppe“ nur über den Code und erhält alle 540. Anna erhält Bens 30 Funde. Beide sehen sich als Mitglieder, Bens eingeschalteter Live-Standort ist bei Anna sichtbar. Eine zweite Runde ohne neue Funde sendet nichts. Dauer: 11–12 s (zwei Läufe am 23.10.2026). Im zweiten Lauf antworteten bei der letzten Abfrage nur 3 der 5 Relays rechtzeitig (der Test stellt viele Abfragen in wenigen Sekunden). Die Daten kamen trotzdem vollständig an. Genau dafür schreibt die App an fünf Relays, und ein Paket gilt erst als verschickt, wenn mindestens zwei es gespeichert haben.
 
-- **Live alle 2–3 Sekunden (neu):** Jedes der 5 Relays leitet die flüchtigen Live-Nachrichten weiter (3 von 3 angekommen), die erste nach 70–560 ms. Über alle Relays zusammen kamen 4 von 4 an, Funde reisen mit.
+- **Live alle 2–3 Sekunden:** Jedes der 5 Relays leitet die flüchtigen Live-Nachrichten weiter (3 von 3 angekommen), die erste nach 105–254 ms (Lauf vom 24.10.2026). Jetzt mit nur **3 gleichzeitigen Verbindungen** statt 5: 4 von 4 angekommen, Funde reisen mit. Zwei Mitglieder mit **verschiedener Relay-Auswahl** (die ersten drei bzw. die letzten drei) treffen sich trotzdem: 4 von 4. Das neue Signal „schaut gerade zu“ des Zuschauers kam beim Sender an (der Sender schaltet nur dann auf 2–3 s).
 
 **7. Fenster und Figuren**
 - Fensterflackern beim Drehen, zwei Ursachen behoben:
@@ -66,12 +68,16 @@ Der Build-Test spricht mit den echten Relays im Internet, nicht mit einer Attrap
 - Mini-Figuren und Abzeichen-Einblendung werden bei jedem Build gerendert (alle 72 Figurenbilder als Bogen, Abzeichen-Moment als Bild). Die Animation selbst (Drehen, Konfetti, Vibrieren) läuft nur auf dem Gerät und ist dort nicht geprüft.
 
 **8. Aussehen der 3D-Karte (Vorschau)**
+- **Muster beim Zoomen (neu):** Bisher halbierten sich Nebelwolken und Fenster bei jeder ganzen Zoomstufe auf dem Bildschirm. Gemessen im Browser mit echten Berliner Kacheln: Bild bei Zoom z gegen das passend vergrößerte Bild bei 17,6 (1,00 = deckungsgleich). Fenster vorher 0,99 bis 17,98, dann 0,73–0,76. Jetzt 0,97–0,99 über die ganze Stufe 17,7–18,4. Nebelwolken vorher 1,00, nach 16,0 nur noch −0,03 bis −0,11 (also ein ganz anderes Muster). Jetzt 1,00 durchgehend. Umgesetzt mit einem Bild je Zoomstufe (jeweils doppelt so groß) und einem Ausdruck, der MapLibre die Bilder der Nachbarstufen gleich mitladen lässt. Ich habe im Quellcode von MapLibre Native 11.8 geprüft, dass das Handy die Bilder genauso lädt. Auf einem echten Gerät angesehen habe ich es nicht.
+
 Die neuen 3D-Gebäude (Fassaden mit beleuchteten Fenstern, dunkle Dächer, mindestens ca. 8 m hoch) wurden mit denselben Berliner Kacheln, demselben Kartenstil und denselben Nebel- und Gebäudedaten in MapLibre GL JS (Browser) gerendert und begutachtet. Auf dem Handy rendert MapLibre Native. Das sollte gleich aussehen, ist aber nicht auf einem echten Gerät geprüft.
 
 ## ⚠️ Nicht getestet (konnte ich ohne echtes Handy nicht prüfen)
 
 - **Echtes Gerät, echtes GPS draußen**, insbesondere in Häuserschluchten, unter Bäumen und im Auto.
-- **Akkuverbrauch in Prozent pro Stunde**. Die automatische GPS-Steuerung (voll in Bewegung, gedrosselt nach 30 s Stehen, Pause nach 2,5 min bzw. 40 s an bekannten Orten) ist umgesetzt und mit Unit-Tests für das Merken der Orte geprüft, der Verbrauch aber nicht gemessen.
+- **Akkuverbrauch in Prozent pro Stunde** und ob der neue Standort-Weg ihn spürbar senkt. Umgesetzt: Google-Standortdienst, Aktivitätserkennung (GPS aus beim Stehen), Bündelung bei ausgeschaltetem Bildschirm, Live nur schnell bei Zuschauern, Karte höchstens 30 Bilder/s, kein atmender Nebelrand, nichts im Hintergrund zeichnen. Gemessen ist nichts davon auf einem Handy. Die App misst es selbst: Menü → Info → Akku & GPS, und es steht im Problembericht.
+- **Aktivitätserkennung auf einem echten Handy:** Ob und wie schnell „steht“ bzw. „geht los“ gemeldet wird (Google gibt bis zu etwa einer Minute Verzögerung an). Im Emulator gibt es keine echten Bewegungssensoren.
+- **Gleiten der Figur entlang der Straße** auf einem echten Gerät (ob es flüssig wirkt und ob die Figur an Kurven sauber folgt).
 - **Kompass-Knopf, 2D/3D-Knopf, Standort-Knopf** und die 3D-Optik auf einem echten Gerät. Wie stark die Straßen unter dem Nebel auf deinem Bildschirm durchschimmern, habe ich nur in der Browser-Vorschau abgestimmt.
 - **Ladezeit der ersten Kartenzelle auf einem echten Handy** (PC 0,15 s, langsamer CI-Emulator 2–14 s).
 - **Selbst-Update auf einem echten Gerät** (Dialog, einmalige Android-Erlaubnis, Installation über die alte Version). Die Serverseite ist geprüft, der Ablauf auf dem Handy noch nicht.

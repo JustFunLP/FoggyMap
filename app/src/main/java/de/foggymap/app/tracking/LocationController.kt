@@ -30,13 +30,13 @@ import com.google.android.gms.location.Priority
  * batching. Phones without Play services use Android's own location service the same way.
  *
  *  - Moving: on foot every 3 s, by car every 2 s.
- *  - Standing: the phone's activity recognition ([Motion], low-power sensor chip) reports "still" →
- *    after ~20 s without GPS movement the GPS is switched OFF. Without activity recognition: throttled
- *    after ~30 s, off after ~2.5 min (~40 s at a place where you often stand, [de.foggymap.app.core.RestSpots]).
- *    While off only free sources are used (positions other apps request anyway, a cheap Wi-Fi/cell fix);
- *    activity recognition and the hardware "significant motion" sensor wake GPS as soon as you move off.
- *    Without activity recognition a short single GPS fix every ~1.5 min catches rides the motion sensor
- *    misses.
+ *  - Standing: the phone's activity recognition ([Motion], low-power sensor chip) reports "still" and
+ *    the GPS shows no movement for ~20 s after that → the GPS is switched OFF. Without activity
+ *    recognition: throttled after ~30 s, off after ~2.5 min (~40 s at a place where you often stand,
+ *    [de.foggymap.app.core.RestSpots]). While off only free sources are used (positions other apps request
+ *    anyway; without activity recognition also a cheap Wi-Fi/cell fix). Activity recognition and the
+ *    hardware "significant motion" sensor wake GPS as soon as you move off; a short single GPS fix every
+ *    4 min (1.5 min without activity recognition) is the safety net for rides both miss.
  *  - No GPS signal for minutes (indoors, underground) → also off instead of letting the receiver search.
  *  - Screen off and nobody watching you live → positions are *batched*: the phone's main processor wakes
  *    only every 20–30 s for a whole batch (every fix keeps its own time, matching works the same).
@@ -219,13 +219,18 @@ class LocationController(private val context: Context, private val onLocations: 
     private var subscribed = false
     private val probe = object : Runnable {
         override fun run() {
-            if (profile != Profile.STILL || motionAware) return
+            if (profile != Profile.STILL) return
             engine.probe { loc -> if (profile == Profile.STILL) onLocations(listOf(loc)) }
             main.postDelayed(this, probeInterval())
         }
     }
 
-    private fun probeInterval(): Long = if (atKnownPlace) 150_000 else 90_000
+    /** With activity recognition the probe is only a last safety net (in case a "moving again" report is missed). */
+    private fun probeInterval(): Long = when {
+        motionAware -> 240_000
+        atKnownPlace -> 150_000
+        else -> 90_000
+    }
 
     private val motion = object : TriggerEventListener() {
         override fun onTrigger(event: TriggerEvent?) { main.post { onSignificantMotion?.invoke() } }
@@ -254,7 +259,7 @@ class LocationController(private val context: Context, private val onLocations: 
         if (p == Profile.STILL) {
             engine.passive(true)
             main.removeCallbacks(probe)
-            if (!motionAware) main.postDelayed(probe, probeInterval())
+            main.postDelayed(probe, probeInterval())
         } else stopStillHelpers()
     }
 

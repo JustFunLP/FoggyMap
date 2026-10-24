@@ -81,6 +81,7 @@ class TrackingService : Service() {
     private var stillSince = 0L
     /** The phone's activity recognition says "standing" (null = no such sensor information right now). */
     private var sensorStill = false
+    private var sensorStillAt = 0L
     /** Places where you often stand still (learned on the phone, never shared). */
     private val restSpots by lazy { de.foggymap.app.core.RestSpots.decode(App.prefs.restSpots) }
     private var lastGoodFixAt = 0L
@@ -100,6 +101,8 @@ class TrackingService : Service() {
     private var lastNotify = 0L
     private var lastLivePush = 0L
     private var lastLocation: Location? = null
+    /** Positions received since the last minute log (for the problem report: is the GPS delivering?). */
+    private var fixesThisMinute = 0
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, i: Intent?) {
@@ -191,6 +194,7 @@ class TrackingService : Service() {
             val ageMs = (SystemClock.elapsedRealtimeNanos() - loc.elapsedRealtimeNanos) / 1_000_000
             if (ageMs > 15 * 60_000) continue
             lastLocation = loc
+            fixesThisMinute++
             App.showLocation(loc) { shown -> snapForDisplay(ex, shown) }
             App.live.onPosition(loc)
             if (loc.hasAccuracy()) stats.addFix(loc.accuracy)
@@ -421,15 +425,13 @@ class TrackingService : Service() {
         }
         val stillFor = now - stillSince
         val knownPlace = fix.accuracy <= 50.0 && restSpots.isKnown(stillAnchor ?: fix.pos)
-        // The motion sensor says "standing" and the GPS agrees (no movement for 20 s): GPS off right away.
-        val stillAfter = when {
-            sensorStill -> STILL_WITH_SENSOR_MS
-            knownPlace -> STILL_AT_KNOWN_PLACE_MS
-            else -> STILL_AFTER_MS
-        }
+        // The motion sensor says "standing" and the GPS agrees – no movement for 20 s since that report
+        // (a sensor can be fooled, e.g. a phone in a smooth train): GPS off.
+        val sensorAgrees = sensorStill && now - maxOf(stillSince, sensorStillAt) > STILL_WITH_SENSOR_MS
+        val stillAfter = if (knownPlace) STILL_AT_KNOWN_PLACE_MS else STILL_AFTER_MS
         val target = when {
             current == LocationController.Profile.STILL -> LocationController.Profile.STILL
-            stillFor > stillAfter -> LocationController.Profile.STILL
+            sensorAgrees || stillFor > stillAfter -> LocationController.Profile.STILL
             !sensorStill && stillFor > SLOW_AFTER_MS -> LocationController.Profile.SLOW
             speed > 7.0 -> LocationController.Profile.FAST
             current == LocationController.Profile.FAST && speed >= 5.0 -> LocationController.Profile.FAST
@@ -480,6 +482,7 @@ class TrackingService : Service() {
     /** Activity recognition reported a change (standing / walking / bike / vehicle). */
     private fun onMotion(st: Motion.State) {
         if (st.mode == TravelMode.STILL && st.entered) {
+            if (!sensorStill) sensorStillAt = SystemClock.elapsedRealtime()
             sensorStill = true
             // Check right away whether the GPS agrees (the next fix would do it too, a few seconds later).
             lastLocation?.let { loc -> updateProfile(Fix(loc.latitude, loc.longitude, if (loc.hasAccuracy()) loc.accuracy.toDouble() else 25.0, loc.time,
@@ -524,7 +527,11 @@ class TrackingService : Service() {
                 android.util.Log.w("FoggyMap", "activity recognition unavailable – GPS decides alone")
             }
             if (tick % 2 == 0) flushStats()
-            if (tick % 4 == 0) sampleBattery()                     // every minute
+            if (tick % 4 == 0) {                                   // every minute
+                sampleBattery()
+                android.util.Log.i("FoggyMap", "gps: $fixesThisMinute positions in the last minute · ${locations.current} · sensor ${if (sensorStill) "still" else "moving/unknown"}")
+                fixesThisMinute = 0
+            }
             if (tick % 2 == 0 && queueDirty) persistQueue()
             if (tick % 12 == 0) App.sync.requestSync(0)            // every 3 minutes
             explorer?.let { ex -> if (queue.isNotEmpty()) drain(ex) }

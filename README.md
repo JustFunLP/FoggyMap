@@ -52,7 +52,7 @@ scripts/       Emulator-End-to-End-Test (simulierte GPS-Route)
 - **Standard: ohne Server über Nostr-Relays.** „Gruppe erstellen“ erzeugt den 12-stelligen Code (60 Bit Zufall) auf dem Handy. Jedes Mitglied hat einen eigenen, zufälligen Signierschlüssel (BIP-340, nur auf dem Gerät) und veröffentlicht seine Funde auf fünf öffentlichen Relays gleichzeitig (`wss://`, also TLS):
   - Funde: ersetzbare App-Daten-Ereignisse (NIP-78, Kind 30078), je ca. 40 KB JSON, komprimiert und verschlüsselt ca. 13 KB. Neue Funde ändern nur das letzte Paket, deshalb wird pro Sync meist nur ein Paket neu gesendet.
   - Mitgliedskarte: Anzeigename, Gruppenname, Kilometer. Wird nur bei Änderung oder alle 6 Stunden gesendet.
-  - Live-Standort: nur nach ausdrücklichem Einschalten. Dann alle 2–3 Sekunden Position, Blickrichtung und die neuesten Funde als *flüchtige* Ereignisse (Kind 20078, NIP-16) über eine offene Verbindung: Relays leiten sie nur weiter und speichern sie nicht. Zusätzlich jede Minute ein gespeicherter Stand mit Ablaufzeit 10 Minuten (NIP-40) für alle, die die App gerade erst öffnen.
+  - Live-Standort: nur nach ausdrücklichem Einschalten. Dann Position, Blickrichtung und die neuesten Funde als *flüchtige* Ereignisse (Kind 20078, NIP-16) über offene Verbindungen zu 3 der 5 Relays (zwei beliebige 3er-Auswahlen aus 5 überschneiden sich immer): alle 2–3 Sekunden, solange ein Mitglied die Karte offen hat (es sendet alle 30 s ein flüchtiges „schaut zu“, Kind 20079), sonst alle 20 s. Relays leiten sie nur weiter und speichern sie nicht. Zusätzlich alle 3 Minuten ein gespeicherter Stand mit Ablaufzeit 10 Minuten (NIP-40) für alle, die die App gerade erst öffnen.
   - **Verschlüsselung:** Aus dem Gruppencode werden per PBKDF2-SHA256 (60.000 Runden) ein öffentliches Such-Kennzeichen und ein AES-256-GCM-Schlüssel abgeleitet. Die Relays sehen nur das Kennzeichen, Zeitstempel und unlesbare Daten. Wer den Code nicht kennt, kann nichts lesen und nichts unterschieben (fremde Pakete lassen sich nicht entschlüsseln und werden verworfen).
   - Sync gebündelt: alle 2–3 Minuten während der Erkundung, beim Öffnen der App und bei Netzwechsel. Abgeholt wird inkrementell ab dem letzten Zeitstempel.
 - **Optional: eigener Server** (Cloudflare Worker + D1 oder Node.js + SQLite, siehe ANLEITUNG Abschnitt 4). Dann gilt: 12-stellige Gruppencodes, Ratenbegrenzung, Eingabeprüfung, Größenlimits und nur HTTPS. Mitglieds-IDs werden gehasht.
@@ -62,7 +62,9 @@ scripts/       Emulator-End-to-End-Test (simulierte GPS-Route)
 
 - `TripModeClassifier` (Unit-Tests) entscheidet aus den umliegenden Minuten, nicht aus einem Moment: Zug, wenn die bewegten Positionen überwiegend genau auf einer Bahnstrecke liegen (< 20 m, Straße mind. 15 m weiter weg) und Zuggeschwindigkeit vorkommt. Auto, wenn innerhalb von 3 min davor oder 90 s danach über ~34 km/h gefahren wird. Rad bei Geschwindigkeiten über ~16 km/h, sonst zu Fuß (auch Joggen). Jede Strecke wird 90 s zurückgehalten, damit der Ampelstart sie noch richtig zuordnet.
 - Von Hand wählbar (Knopf auf der Karte, gilt bis zum Ende der Tour): Zug deckt nichts auf, Auto passt nur auf befahrbare Straßen.
+- Die Aktivitätserkennung des Handys (Fahrzeug / Rad / zu Fuß) entscheidet Fälle, die das Tempo allein nicht kann: Auto im Stau, langsames Rad, schneller Läufer (Unit-Tests).
 - Die Figur auf der Karte folgt der Fortbewegung (Läufer, Radfahrer, Auto, Zug, jeweils von der Seite, von vorn und von hinten, animiert). Freunde schicken ihre Fortbewegung im Live-Kanal mit.
+- **Figur auf der Straße** (`RoadSnapper`, Unit-Tests, nur Anzeige): Die Figur steht auf der Mittellinie der Straße, auf der du bist, statt dort, wo das GPS gerade hinwackelt. Eingerastet wird nur, wenn eine Straße nah genug ist (15 m bzw. die GPS-Genauigkeit bis 25 m; verlassen erst bei 8 m mehr). Eine andere Straße übernimmt nur, wenn sie deutlich besser passt und zur Bewegungsrichtung passt. Zwischen zwei Positionen gleitet die Figur mit deinem Tempo die Straße entlang (auch geradeaus über die Kreuzung) und tritt nie ein paar Meter zurück, nur weil eine Position spät kam.
 
 ## Fehlersuche
 
@@ -78,16 +80,19 @@ scripts/       Emulator-End-to-End-Test (simulierte GPS-Route)
 
 ## Akku
 
+Wie bei Google Maps und Waze: Standort vom **Google Fused Location Provider** (Play-Dienste; ohne Play-Dienste Androids eigener Standortdienst) und **Aktivitätserkennung** (Activity Recognition Transition API, läuft auf dem stromsparenden Sensor-Chip, Berechtigung „Körperliche Aktivität“, optional).
+
 | Maßnahme | Wirkung |
 |---|---|
-| Nach ~30 s Stillstand nur noch alle 10 s eine Position | spart bei kurzen Halten (Ampel, Schaufenster) |
-| GPS aus nach ~2,5 min Stillstand. Aufwecken über den Bewegungssensor, passive Positionen und kurze GPS-Stichproben alle 45 s | größter Effekt beim Stehen und Sitzen |
-| **Bewegungsprofil:** Orte, an denen du schon zweimal stillgestanden hast (Zuhause, Büro), merkt sich das Handy (nur lokal). Dort pausiert das GPS schon nach ~40 s, Stichproben alle 90 s | weniger GPS an den Orten, an denen du am meisten Zeit verbringst |
-| Kein GPS-Empfang seit 3 min (drinnen) → Pause | verhindert stundenlange Satellitensuche |
+| **Aktivitätserkennung meldet „steht“ und das GPS bestätigt es (20 s ohne Bewegung) → GPS ganz aus.** Wieder an, sobald der Sensor „geht / Rad / Fahrzeug“ meldet oder der Bewegungssensor auslöst. Im Stand keine GPS-Stichproben, nur kostenlose passive Positionen | größter Effekt: GPS an jeder Ampel, im Café, im Büro aus |
+| Ohne Aktivitätserkennung: nach ~30 s Stillstand alle 10 s, nach ~2,5 min aus (an oft besuchten Orten nach ~40 s), Stichprobe alle 1,5 min | wie bisher |
+| Kein GPS-Empfang seit 3 min (drinnen) → aus | verhindert stundenlange Satellitensuche |
 | Update-Rate je nach Tempo (zu Fuß alle 3 s, Auto alle 2 s) | genug Punkte auch für kurze Abschnitte |
-| Bildschirm aus → gebündelte Lieferung durch den GPS-Chip (Android 12+) | Hauptprozessor wacht nur alle 15–30 s auf |
+| Bildschirm aus → gebündelte Lieferung (alle 20–30 s ein Paket), außer jemand aus der Gruppe schaut gerade live zu | Hauptprozessor schläft dazwischen |
+| **Live-Standort:** nur 3 statt 5 Relay-Verbindungen; alle 2–3 s nur, solange jemand die Karte offen hat (Signal „schaut zu“ alle 30 s), sonst alle 20 s / im Stand 60 s. Gespeicherter Live-Stand alle 3 statt jede Minute | Funkmodul kann zwischen den Sendungen schlafen |
+| Karte höchstens 30 Bilder/s (60 nur beim Wischen), Figur-Animation ~5 Bilder/s, kein „atmender“ Nebelrand mehr (zeichnete die 3D-Karte 3×/s neu), Kompass-Zittern unter 3° dreht die Karte nicht | weniger GPU bei eingeschaltetem Bildschirm |
+| Im Hintergrund wird nichts gezeichnet oder neu berechnet; Nebel höchstens alle 4 s neu aufgebaut | weniger CPU |
 | Kartendaten einmalig pro Kachel, Sync gebündelt, keine Wakelocks | weniger Funk und CPU |
-| Karte animiert nur im Vordergrund. Kein dauerhaft pulsierender Positionspunkt | weniger GPU |
 
 Es gibt keine Akku- oder GPS-Einstellungen: Alles oben passiert automatisch. Was das GPS gerade tut, steht unter Menü → Info.
 

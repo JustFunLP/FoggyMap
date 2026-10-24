@@ -138,6 +138,8 @@ src = [l.split("FoggyMap: ")[-1] for l in log if "FoggyMap: location source:" in
 if src: summary.append("Standortdienst: " + src[-1].replace("location source: ", ""))
 motion = [l.split("FoggyMap: ")[-1] for l in log if "FoggyMap: motion" in l]
 summary.append("Bewegungserkennung: " + ("; ".join(motion[-4:]) if motion else "keine Meldung"))
+gpsmin = [l.split("FoggyMap: gps: ")[-1].split(" positions")[0] for l in log if "FoggyMap: gps: " in l]
+if gpsmin: summary.append("GPS-Positionen pro Minute: " + ", ".join(gpsmin[-8:]))
 fog_updates = sum(1 for l in log if "fog updated" in l)
 summary.append(f"Nebel-Aktualisierungen der Karte: {fog_updates}")
 counts = {}

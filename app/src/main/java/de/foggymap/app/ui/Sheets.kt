@@ -123,7 +123,7 @@ private fun MotionLine() {
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f)) {
-            InfoLine(painterResource(R.drawable.ic_auto_mode), "Bewegungserkennung", value, if (permitted && playServices) Fog.Success else Fog.Amber)
+            InfoLine(painterResource(R.drawable.ic_auto_mode), "Bewegungs-\nerkennung", value, if (permitted && playServices) Fog.Success else Fog.Amber)
         }
         if (playServices && !permitted && android.os.Build.VERSION.SDK_INT >= 29) {
             TextButton(onClick = { launcher.launch(android.Manifest.permission.ACTIVITY_RECOGNITION) }) { Text("Erlauben", color = Fog.Lavender) }
@@ -198,7 +198,7 @@ internal fun InfoTab(sync: SyncUi) {
     SectionTitle("Aufgedeckt")
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         StatTile("${c.roadKm.de(1)} km", "Straßen erkundet", painterResource(R.drawable.ic_road), Modifier.weight(1f))
-        StatTile(c.roads.de(), "Straßenabschnitte", painterResource(R.drawable.ic_compass), Modifier.weight(1f))
+        StatTile(c.roads.de(), "Abschnitte", painterResource(R.drawable.ic_compass), Modifier.weight(1f))
     }
     Spacer(Modifier.height(10.dp))
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -215,7 +215,7 @@ internal fun InfoTab(sync: SyncUi) {
     val total = walk + bike + car + train
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         StatTile("${(total / 1000).de(1)} km", "zurückgelegt", rememberVectorPainter(Icons.Filled.LocationOn), Modifier.weight(1f))
-        StatTile(formatDuration(prefs.trackedSeconds), "Erkundungszeit", painterResource(R.drawable.ic_clock), Modifier.weight(1f))
+        StatTile(formatDuration(prefs.trackedSeconds), "unterwegs", painterResource(R.drawable.ic_clock), Modifier.weight(1f))
     }
     Spacer(Modifier.height(12.dp))
     ModeRow(painterResource(R.drawable.ic_walk), "Zu Fuß", walk, total)
