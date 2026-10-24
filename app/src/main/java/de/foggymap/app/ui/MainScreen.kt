@@ -482,7 +482,7 @@ internal fun ModeOptions(current: TravelMode?, onPick: (TravelMode?) -> Unit) {
         Triple(TravelMode.WALK, "Zu Fuß", "Gehen und Laufen"),
         Triple(TravelMode.BIKE, "Fahrrad", ""),
         Triple(TravelMode.CAR, "Auto", "Nur Straßen, auf denen Autos fahren"),
-        Triple(TravelMode.TRAIN, "Zug", "Unterwegs wird nichts aufgedeckt"),
+        Triple(TravelMode.TRAIN, "Zug", "Deckt einen Streifen entlang der Gleise auf"),
     )
             Column {
                 for ((m, title, sub) in options) {

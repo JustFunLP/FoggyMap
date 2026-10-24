@@ -11,8 +11,8 @@ class RadiusRevealer {
     private var last: Fix? = null
     private val gf = GeometryFactory()
 
-    fun onFix(fix: Fix, radius: Double): List<RevealItem> {
-        if (fix.accuracy > 30.0 || radius < 10.0) return emptyList()
+    fun onFix(fix: Fix, radius: Double, maxAccuracy: Double = 30.0): List<RevealItem> {
+        if (fix.accuracy > maxAccuracy || radius < 10.0) return emptyList()
         val prev = last
         val step = maxOf(radius / 3, 10.0)
         if (prev != null && fix.timeMs > prev.timeMs && Geo.distance(prev.pos, fix.pos) < step) return emptyList()

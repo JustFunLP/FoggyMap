@@ -204,8 +204,9 @@ class TrackingService : Service() {
                 if (loc.hasBearing() && loc.hasSpeed() && loc.speed > 1f) loc.bearing.toDouble() else null)
             enqueue(fix)
             if (fix.accuracy <= 35.0) publishTrail(fix.pos)
-            // On a train nothing is uncovered (you are not on the street).
-            if (App.prefs.revealMode == de.foggymap.app.core.RevealMode.RADIUS && tripMode.current() != TravelMode.TRAIN) revealRadius(fix)
+            // On a train the strip along the tracks is uncovered instead (see revealAlongTrack).
+            val onTrain = App.manualMode.value == TravelMode.TRAIN || (App.manualMode.value == null && tripMode.current() == TravelMode.TRAIN)
+            if (App.prefs.revealMode == de.foggymap.app.core.RevealMode.RADIUS && !onTrain) revealRadius(fix)
             fix.bearing?.let { lastHeading = it }
             updateProfile(fix, loc, defer = true)
         }
@@ -262,9 +263,17 @@ class TrackingService : Service() {
             val (rail, road) = ex.railContext(head.pos)
             val onRail = rail != null && rail < 20.0 && (road == null || road > rail + 15.0)
             val train = manual == TravelMode.TRAIN || (manual == null && tripMode.current() == TravelMode.TRAIN)
+            if (rail != null && rail < 30.0) {
+                recentRail.addLast(head)
+                while (recentRail.isNotEmpty() && head.timeMs - recentRail.first().timeMs > TRAIN_REPLAY_MS) recentRail.removeFirst()
+            }
             val step = ex.onFix(head, reveal = !train)
             val speed = head.speed ?: step.result.speed
             if (train) {
+                // Just recognised as a train: clear the stretch since you got on as well.
+                if (!wasTrain) { trainBand.reset(); recentRail.filter { it.timeMs < head.timeMs }.forEach { revealAlongTrack(ex, it) } }
+                wasTrain = true
+                revealAlongTrack(ex, head)
                 // The street matcher is off on the train: count the distance along the fixes.
                 val prev = lastTrainFix
                 val d = if (prev != null && head.timeMs - prev.timeMs in 1..60_000 && head.accuracy <= 50.0) Geo.distance(prev.pos, head.pos) else 0.0
@@ -273,6 +282,7 @@ class TrackingService : Service() {
                 addDistances(tripMode.add(head.timeMs, speed, d, onRail))
             } else {
                 lastTrainFix = null
+                if (wasTrain) { wasTrain = false; trainBand.reset() }
                 if (step.result.accepted && step.result.countedDistance > 0) {
                     sessionMeters += step.result.countedDistance
                     addDistances(tripMode.add(head.timeMs, speed, step.result.countedDistance, onRail))
@@ -296,6 +306,25 @@ class TrackingService : Service() {
                     message = if (step.result.accepted) null else it.message)
             }
         }
+    }
+
+    /** On the train: a strip along the tracks (each position moved onto the railway line it is on). */
+    private val trainBand = de.foggymap.app.core.RadiusRevealer()
+    /** Positions near a railway in the last minutes: when the train is recognised, that stretch is cleared too. */
+    private val recentRail = ArrayDeque<Fix>()
+    private var wasTrain = false
+
+    private suspend fun revealAlongTrack(ex: Explorer, fix: Fix) {
+        val onTrack = ex.railSnap(fix.pos, TRAIN_SNAP_M)
+        // On the tracks the position is as good as the railway line itself; without one, plain GPS (looser on a train).
+        val f = if (onTrack != null) fix.copy(lat = onTrack.lat, lon = onTrack.lon, accuracy = minOf(fix.accuracy, 15.0)) else fix
+        val items = trainBand.onFix(f, TRAIN_STRIP_M, maxAccuracy = 60.0)
+        if (items.isEmpty()) return
+        val added = withContext(Dispatchers.IO) { App.db.insert(items, RevealDatabase.OWNER_ME, synced = false) }
+        if (added.isEmpty()) return
+        App.live.queueItems(added)
+        App.notifyDbChanged(); App.sync.requestSync()
+        revealBuildingsFor(added)
     }
 
     private fun requestCell(cell: CellKey) {
@@ -699,6 +728,10 @@ class TrackingService : Service() {
         const val STILL_AFTER_MS = 150_000L
         const val STILL_AT_KNOWN_PLACE_MS = 40_000L
         const val STILL_WITH_SENSOR_MS = 20_000L
+        /** On the train: cleared strip, metres to either side of the tracks. */
+        const val TRAIN_STRIP_M = 40.0
+        const val TRAIN_SNAP_M = 35.0
+        const val TRAIN_REPLAY_MS = 300_000L
         const val SLOW_AFTER_MS = 30_000L
         const val NO_SIGNAL_MS = 180_000L
 

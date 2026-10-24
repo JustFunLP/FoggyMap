@@ -76,6 +76,18 @@ class WorldModel(val data: OsmData) {
         return hits.minOfOrNull { it.distance(pt) }?.takeIf { it <= max }
     }
 
+    /** The closest point on a railway line and its distance, if one is within [max] metres. */
+    fun railSnap(p: LatLon, max: Double): Pair<LatLon, Double>? {
+        val c = proj.toLocal(p)
+        val pt = gf.createPoint(c)
+        @Suppress("UNCHECKED_CAST")
+        val hits = railIndex.query(Envelope(c).apply { expandBy(max) }) as List<LineString>
+        val best = hits.minByOrNull { it.distance(pt) } ?: return null
+        val d = best.distance(pt)
+        if (d > max) return null
+        return proj.toGeo(DistanceOp.nearestPoints(best, pt)[0]) to d
+    }
+
     /** Distance to the nearest street a car can use, if one is within [max] metres. */
     fun roadDistance(p: LatLon, max: Double): Double? =
         candidates(p, max).filter { it.segment.roadClass.vehicular }.minOfOrNull { it.distance }

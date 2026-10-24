@@ -89,4 +89,33 @@ class RevealModeTest {
         assertTrue(items.any { it.kind == RevealKind.ROAD })
         assertTrue(items.none { it.kind == RevealKind.BLOCK || it.kind == RevealKind.AREA })
     }
+
+    @Test fun onTheTrainAStripAlongTheTracksIsCleared() {
+        // A railway along y = 300 (no street nearby), ridden at 30 m/s with GPS 15–20 m off to either side
+        // and poor accuracy (train windows).
+        val b = TestWorlds.Builder()
+        b.way(mapOf("railway" to "rail"), -1000.0 to 300.0, 1000.0 to 300.0)
+        val m = b.build()
+        val band = RadiusRevealer()
+        val items = ArrayList<RevealItem>()
+        var t = 0L
+        for (i in 0..30) {
+            val x = -900.0 + i * 60.0
+            val raw = TestWorlds.ll(x, 300.0 + if (i % 2 == 0) 18.0 else -15.0)
+            val onTrack = m.railSnap(raw, 35.0)
+            assertTrue("fix $i finds the tracks", onTrack != null)
+            val p = onTrack!!.first
+            t += 2000
+            items += band.onFix(Fix(p.lat, p.lon, 15.0, t, 30.0), 40.0, maxAccuracy = 60.0)
+        }
+        val fog = fogOf(items)
+        // the tracks themselves are clear all the way, the strip is centred on them (not on the wobbly GPS)
+        for (x in -880..880 step 40) assertTrue("track at x=$x", fog.containsPoint(TestWorlds.ll(x.toDouble(), 300.0)))
+        assertTrue(fog.containsPoint(TestWorlds.ll(0.0, 335.0)))
+        assertTrue(fog.containsPoint(TestWorlds.ll(0.0, 265.0)))
+        assertFalse(fog.containsPoint(TestWorlds.ll(0.0, 350.0)))
+        assertFalse(fog.containsPoint(TestWorlds.ll(0.0, 250.0)))
+        // far from any railway nothing is snapped
+        assertTrue(m.railSnap(TestWorlds.ll(0.0, 400.0), 35.0) == null)
+    }
 }

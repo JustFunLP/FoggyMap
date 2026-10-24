@@ -85,6 +85,10 @@ class Explorer(knownRoadIds: Collection<String>) {
         }
         return rail to road
     }
+    /** The closest point on a railway (within [max] metres): on the train the cleared strip follows the tracks. */
+    fun railSnap(p: LatLon, max: Double): LatLon? =
+        models.values.mapNotNull { it.railSnap(p, max) }.minByOrNull { it.second }?.first
+
     private var graph: GapFill.Graph? = null
     private var lastGood: Fix? = null
 
