@@ -57,6 +57,29 @@ class WorldModel(val data: OsmData) {
         faces.forEach { faceIndex.insert(it.polygon.envelopeInternal, it) }
     }
 
+    /** Railway lines of this cell (for "by train"): built on first use. */
+    private val railIndex: STRtree by lazy {
+        STRtree().apply {
+            for (w in data.ways) if (w.tags["railway"] != null && w.points.size >= 2) try {
+                val l = gf.createLineString(w.points.map { proj.toLocal(it) }.toTypedArray())
+                insert(l.envelopeInternal, l)
+            } catch (_: Exception) { }
+        }
+    }
+
+    /** Distance to the nearest railway line, if one is within [max] metres. */
+    fun railDistance(p: LatLon, max: Double): Double? {
+        val c = proj.toLocal(p)
+        val pt = gf.createPoint(c)
+        @Suppress("UNCHECKED_CAST")
+        val hits = railIndex.query(Envelope(c).apply { expandBy(max) }) as List<LineString>
+        return hits.minOfOrNull { it.distance(pt) }?.takeIf { it <= max }
+    }
+
+    /** Distance to the nearest street a car can use, if one is within [max] metres. */
+    fun roadDistance(p: LatLon, max: Double): Double? =
+        candidates(p, max).filter { it.segment.roadClass.vehicular }.minOfOrNull { it.distance }
+
     /** Total length of streets whose ids are stable in this cell (used for the exploration percentage). */
     val completeSegments get() = segments.filter { it.matchable }
 

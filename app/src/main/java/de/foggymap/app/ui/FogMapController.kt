@@ -165,7 +165,8 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         add(FillLayer(L_DISSOLVE_CLOUDS, SRC_FLASH).withProperties(fillPattern(IMG_CLOUDS), fillOpacity(0f)))
         add(LineLayer(L_FLASH, SRC_FLASH).withProperties(lineColor(LAVENDER), lineOpacity(0f), lineBlur(4f), lineWidth(2f)))
         // Group members who share their live position: a walking figure, its viewing cone and the name.
-        val pr = context.resources.displayMetrics.density.toInt().coerceIn(1, 4)
+        // Figures at most at pixel ratio 3: 176 pictures stay small in memory and still look sharp.
+        val pr = context.resources.displayMetrics.density.toInt().coerceIn(1, 3)
         for ((name, bmp) in Figures.all(pr)) style.addImage(name, bmp)
         add(SymbolLayer(L_FRIENDS_CONE, SRC_FRIENDS).withProperties(iconImage(Figures.coneName(Figures.FRIEND)), iconRotate(get("b")),
             iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP), iconPitchAlignment(Property.ICON_PITCH_ALIGNMENT_MAP),
@@ -316,7 +317,11 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
     private var visible = false
     private var walkFrame = 0
     private val ticker = Runnable { tick() }
-    private class Friend(val key: String, val name: String, val pos: LatLon, val heading: Double?, val speed: Double?, val atMs: Long)
+    private class Friend(val key: String, val name: String, val pos: LatLon, val heading: Double?, val speed: Double?, val atMs: Long,
+                         val mode: de.foggymap.app.core.TravelMode? = null)
+    /** How you move right now (walking, bike, car, train): decides your figure. */
+    private var myMode: de.foggymap.app.core.TravelMode = de.foggymap.app.core.TravelMode.WALK
+    fun setMyMode(mode: de.foggymap.app.core.TravelMode) { if (mode != myMode) { myMode = mode; refreshFigures() } }
     private var friends: List<Friend> = emptyList()
     private var lastFriendsJson = ""
 
@@ -333,7 +338,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
 
     private fun tick() {
         if (!visible || disposed) return
-        walkFrame = (walkFrame + 1) % Figures.FRAMES
+        walkFrame = (walkFrame + 1) % 240      // any multiple of 8, 6 and 4: every animation loops smoothly
         refreshFigures()
         ensureTicker()
     }
@@ -348,7 +353,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         val features = friends.map { f ->
             val walking = friendWalking(f) && animationsEnabled
             val view = Figures.viewFor(f.heading?.let { it - cam })
-            val props = StringBuilder("\"name\":${org.json.JSONObject.quote(f.name)},\"img\":\"${Figures.imageName(Figures.FRIEND, view, if (walking) walkFrame else -1)}\"")
+            val props = StringBuilder("\"name\":${org.json.JSONObject.quote(f.name)},\"img\":\"${Figures.imageName(Figures.FRIEND, Figures.kindFor(f.mode), view, if (walking) walkFrame else -1)}\"")
             f.heading?.let { props.append(",\"b\":").append("%.0f".format(java.util.Locale.ROOT, it)) }
             FogBuilder.feature(FogBuilder.pointJson(f.pos), props.toString())
         }
@@ -364,7 +369,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         val byKey = LinkedHashMap<String, Friend>()
         members.filter { !it.isMe && it.live != null }.forEach { byKey[it.key] = Friend(it.key, it.name, it.live!!, null, null, 0) }
         live.values.filter { now - it.atMs < de.foggymap.app.data.LiveLink.STALE_MS }
-            .forEach { byKey[it.key] = Friend(it.key, it.name, it.pos, it.heading, it.speed, it.atMs) }
+            .forEach { byKey[it.key] = Friend(it.key, it.name, it.pos, it.heading, it.speed, it.atMs, it.mode) }
         friends = byKey.values.toList()
         renderFriends()
         ensureTicker()
@@ -508,7 +513,7 @@ class FogMapController(private val context: Context, private val map: MapLibreMa
         val acc = lastLoc?.takeIf { it.hasAccuracy() }?.accuracy?.toDouble() ?: 0.0
         // Accuracy circle radius in screen pixels at zoom 0 (512-px tiles); the layer scales it with the zoom.
         val r0 = acc / (78271.517 * kotlin.math.cos(Math.toRadians(p.latitude)))
-        val props = StringBuilder("\"img\":\"${Figures.imageName(Figures.ME, view, if (walking) walkFrame else -1)}\"")
+        val props = StringBuilder("\"img\":\"${Figures.imageName(Figures.ME, Figures.kindFor(myMode), view, if (walking) walkFrame else -1)}\"")
         props.append(",\"acc\":").append(acc.toInt()).append(",\"r0\":").append("%.9f".format(java.util.Locale.ROOT, r0))
         if (hasBearing) props.append(",\"b\":").append("%.1f".format(java.util.Locale.ROOT, bearing))
         val json = FogBuilder.featureCollection(listOf(

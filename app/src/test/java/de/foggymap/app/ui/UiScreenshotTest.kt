@@ -85,7 +85,8 @@ class UiScreenshotTest {
     fun hud() = shot("hud") {
         val t = TrackingUi(active = true, accuracy = 6f, mode = TravelMode.WALK, sessionSegments = 7, sessionMeters = 1840.0)
         Box(Modifier.fillMaxSize().background(mapBackground())) {
-            MapControls(t, 3, mapBearing = 35f, northUp = false, tilted = true, following = true, {}, {}, {}, {}, {})
+            MapControls(t, 3, mapBearing = 35f, northUp = false, tilted = true, following = true, {}, {}, {}, {}, {},
+                mode = de.foggymap.app.core.TravelMode.BIKE, modeByHand = false)
         }
     }
 
@@ -103,31 +104,17 @@ class UiScreenshotTest {
         }
     }
 
-    /** All walking-figure frames and the two cones on one sheet. */
+    /** All figure pictures (walking, bike, car, train; both colours) and the cones on one sheet. */
     @Test fun figureSheet() {
-        val imgs = Figures.all(2)
-        val w = 64; val h = 96
-        val cols = Figures.FRAMES + 1
-        val rows = 2 * Figures.View.entries.size + 1
-        val sheet = Bitmap.createBitmap(cols * w, rows * h, Bitmap.Config.ARGB_8888)
+        val imgs = Figures.all(2).values.toList()
+        val cw = 132; val ch = 100; val cols = 9
+        val rows = (imgs.size + cols - 1) / cols
+        val sheet = Bitmap.createBitmap(cols * cw, rows * ch, Bitmap.Config.ARGB_8888)
         val c = android.graphics.Canvas(sheet)
         c.drawColor(0xFF14162C.toInt())
-        var r = 0
-        for (scheme in listOf(Figures.ME, Figures.FRIEND)) for (v in Figures.View.entries) {
-            for (f in -1 until Figures.FRAMES) imgs[Figures.imageName(scheme, v, f)]?.let { c.drawBitmap(it, ((f + 1) * w).toFloat(), (r * h).toFloat(), null) }
-            r++
-        }
-        imgs[Figures.coneName(Figures.ME)]?.let { c.drawBitmap(it, 0f, (r * h).toFloat(), null) }
-        imgs[Figures.coneName(Figures.FRIEND)]?.let { c.drawBitmap(it, 160f, (r * h).toFloat(), null) }
+        imgs.forEachIndexed { i, b -> c.drawBitmap(b, ((i % cols) * cw).toFloat(), ((i / cols) * ch + (ch - b.height)).toFloat().coerceAtLeast(0f), null) }
         val dir = File("build/screenshots").apply { mkdirs() }
         FileOutputStream(File(dir, "figuren.png")).use { sheet.compress(Bitmap.CompressFormat.PNG, 100, it) }
-    }
-
-    @Test @Config(qualifiers = "w400dp-h860dp-xhdpi")
-    fun badgeCelebration() = shot("abzeichen") {
-        Box(Modifier.fillMaxSize().background(mapBackground())) {
-            BadgeCelebration(de.foggymap.app.core.Badges.CATALOG[0], static = true) {}
-        }
     }
 
     /** The problem report as text, to check it holds no place, name or code. */
@@ -142,5 +129,10 @@ class UiScreenshotTest {
             org.junit.Assert.assertTrue(report.contains("FoggyMap-Problembericht"))
             org.junit.Assert.assertFalse("no group code in the report", report.contains("ABCDEFGHJKMN"))
         } finally { app.prefs.groupCode = "" }
+    }
+
+    @Test @Config(qualifiers = "w400dp-h860dp-xhdpi")
+    fun modePicker() = shot("fortbewegung") {
+        Sheet { ModeOptions(de.foggymap.app.core.TravelMode.TRAIN) {} }
     }
 }

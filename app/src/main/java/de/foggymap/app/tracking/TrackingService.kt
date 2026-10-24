@@ -87,6 +87,7 @@ class TrackingService : Service() {
     private val distanceBuffer = HashMap<TravelMode, Double>()
     /** On foot / bike / car from the speeds of the surrounding minutes (not from one moment). */
     private var tripMode = de.foggymap.app.core.TripModeClassifier()
+    private var lastTrainFix: Fix? = null
     private fun addDistances(m: Map<TravelMode, Double>) = m.forEach { (k, v) -> distanceBuffer[k] = (distanceBuffer[k] ?: 0.0) + v }
     private var sessionSegments = 0
     private var sessionMeters = 0.0
@@ -192,7 +193,8 @@ class TrackingService : Service() {
                 if (loc.hasBearing() && loc.hasSpeed() && loc.speed > 1f) loc.bearing.toDouble() else null)
             enqueue(fix)
             if (fix.accuracy <= 35.0) publishTrail(fix.pos)
-            if (App.prefs.revealMode == de.foggymap.app.core.RevealMode.RADIUS) revealRadius(fix)
+            // On a train nothing is uncovered (you are not on the street).
+            if (App.prefs.revealMode == de.foggymap.app.core.RevealMode.RADIUS && tripMode.current() != TravelMode.TRAIN) revealRadius(fix)
             fix.bearing?.let { lastHeading = it }
             updateProfile(fix, loc)
         }
@@ -223,12 +225,29 @@ class TrackingService : Service() {
             }
             queue.removeFirst(); queueDirty = true
             ex.missingCells(head.pos, head.bearing ?: lastHeading).forEach { requestCell(it) }   // prefetch the cell ahead
-            val step = ex.onFix(head)
+            // Way of moving: chosen by hand, or recognised (on a railway, away from streets, fast → train).
+            val manual = App.manualMode.value
+            tripMode.manual = manual
+            ex.vehicleOnly = manual == TravelMode.CAR
+            val (rail, road) = ex.railContext(head.pos)
+            val onRail = rail != null && rail < 20.0 && (road == null || road > rail + 15.0)
+            val train = manual == TravelMode.TRAIN || (manual == null && tripMode.current() == TravelMode.TRAIN)
+            val step = ex.onFix(head, reveal = !train)
             val speed = head.speed ?: step.result.speed
-            if (step.result.accepted && step.result.countedDistance > 0) {
-                sessionMeters += step.result.countedDistance
-                addDistances(tripMode.add(head.timeMs, speed, step.result.countedDistance))
-            } else addDistances(tripMode.speed(head.timeMs, speed))
+            if (train) {
+                // The street matcher is off on the train: count the distance along the fixes.
+                val prev = lastTrainFix
+                val d = if (prev != null && head.timeMs - prev.timeMs in 1..60_000 && head.accuracy <= 50.0) Geo.distance(prev.pos, head.pos) else 0.0
+                lastTrainFix = head
+                sessionMeters += d
+                addDistances(tripMode.add(head.timeMs, speed, d, onRail))
+            } else {
+                lastTrainFix = null
+                if (step.result.accepted && step.result.countedDistance > 0) {
+                    sessionMeters += step.result.countedDistance
+                    addDistances(tripMode.add(head.timeMs, speed, step.result.countedDistance, onRail))
+                } else addDistances(tripMode.speed(head.timeMs, speed, onRail))
+            }
             if (step.items.isNotEmpty()) {
                 val added = withContext(Dispatchers.IO) { App.db.insert(step.items, RevealDatabase.OWNER_ME, synced = false) }
                 App.live.queueItems(added)
@@ -545,6 +564,8 @@ class TrackingService : Service() {
     // ------------------------------------------------------------------ teardown
 
     private fun shutdown() {
+        // A way of moving chosen by hand is for this tour only.
+        App.manualMode.value = null; App.prefs.manualMode = ""
         sampleBattery()
         App.prefs.lastTour = tourSummary().toString()
         de.foggymap.app.data.Diagnostics.tour.value = null

@@ -146,7 +146,7 @@ internal fun InfoTab(sync: SyncUi) {
             InfoLine(painterResource(R.drawable.ic_compass), "GPS-Genauigkeit",
                 if (acc == null) "sucht …" else "±${acc.toInt()} m" + if (acc > 35f) " (zu ungenau, es wird nichts aufgedeckt)" else "",
                 if (acc == null || acc > 35f) Fog.Amber else Fog.Success)
-            InfoLine(painterResource(when (tracking.mode) { TravelMode.CAR -> R.drawable.ic_car; TravelMode.BIKE -> R.drawable.ic_bike; else -> R.drawable.ic_walk }),
+            InfoLine(painterResource(modeIcon(tracking.mode)),
                 "Unterwegs", modeLabel(tracking.mode), Fog.Lavender)
             InfoLine(painterResource(R.drawable.ic_battery), "GPS", tracking.powerProfile.ifEmpty { "GPS aktiv" }, Fog.Lavender)
             if (tracking.loadingMap) InfoLine(painterResource(R.drawable.ic_cloud), "Karte", "lädt Straßen …", Fog.Cyan)
@@ -178,7 +178,8 @@ internal fun InfoTab(sync: SyncUi) {
     }
     SectionTitle("Unterwegs")
     val walk = prefs.distance(TravelMode.WALK); val bike = prefs.distance(TravelMode.BIKE); val car = prefs.distance(TravelMode.CAR)
-    val total = walk + bike + car
+    val train = prefs.distance(TravelMode.TRAIN)
+    val total = walk + bike + car + train
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         StatTile("${(total / 1000).de(1)} km", "zurückgelegt", rememberVectorPainter(Icons.Filled.LocationOn), Modifier.weight(1f))
         StatTile(formatDuration(prefs.trackedSeconds), "Erkundungszeit", painterResource(R.drawable.ic_clock), Modifier.weight(1f))
@@ -187,6 +188,7 @@ internal fun InfoTab(sync: SyncUi) {
     ModeRow(painterResource(R.drawable.ic_walk), "Zu Fuß", walk, total)
     ModeRow(painterResource(R.drawable.ic_bike), "Fahrrad", bike, total)
     ModeRow(painterResource(R.drawable.ic_car), "Auto", car, total)
+    ModeRow(painterResource(R.drawable.ic_train), "Zug", train, total)
     if (sync.inGroup && sync.members.isNotEmpty()) {
         SectionTitle("Gruppe „${sync.groupName}“")
         withLocalMe(sync.members, c).sortedByDescending { it.km }.forEachIndexed { i, m -> MemberRow(i, m.name, m.km, m.roads, m.isMe, m.live != null) }

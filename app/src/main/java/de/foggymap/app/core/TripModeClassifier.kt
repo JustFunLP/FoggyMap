@@ -1,43 +1,52 @@
 package de.foggymap.app.core
 
 /**
- * On foot, by bike or by car – decided from the speeds of the surrounding minutes, not from one moment:
- * a car crawling through town at 20 km/h is still a car, a jogger is on foot.
+ * On foot, by bike, by car or by train – decided from the surrounding minutes, not from one moment:
+ * a car crawling through town at 20 km/h is still a car, a jogger is on foot, and someone moving fast
+ * right on a railway line, away from any street, is on a train.
  *
  * Every counted distance is held back for [DECIDE_AFTER_MS] so that what happens right afterwards
  * (speeding up to 50 km/h at the next green light) can still decide it.
+ *  - mostly on a railway (and away from streets) with train speeds around → train,
  *  - any speed above [CAR_SPEED] within 3 minutes before or 90 s after → car,
  *  - slow for the whole next 90 s (parked and walking away) → on foot,
  *  - bike speeds around (above [BIKE_SPEED]) → bike,
  *  - otherwise on foot (walking and running).
+ * Chosen by hand ([manual]) always wins.
  */
 class TripModeClassifier {
     private class Piece(val timeMs: Long, val speed: Double, val meters: Double)
+    private class Sample(val timeMs: Long, val speed: Double, val onRail: Boolean)
     private val pending = ArrayDeque<Piece>()
-    private val speeds = ArrayDeque<Pair<Long, Double>>()
+    private val speeds = ArrayDeque<Sample>()
     private var latest = 0L
+    /** Set by hand in the app (null = automatic). */
+    var manual: TravelMode? = null
 
     /** Adds a counted distance; returns the distances decided now (mode → metres). */
-    fun add(timeMs: Long, speed: Double, meters: Double): Map<TravelMode, Double> {
+    fun add(timeMs: Long, speed: Double, meters: Double, onRail: Boolean = false): Map<TravelMode, Double> {
         latest = maxOf(latest, timeMs)
-        speeds.addLast(timeMs to speed)
-        while (speeds.isNotEmpty() && latest - speeds.first().first > BEFORE_MS + DECIDE_AFTER_MS) speeds.removeFirst()
+        speeds.addLast(Sample(timeMs, speed, onRail))
+        while (speeds.isNotEmpty() && latest - speeds.first().timeMs > BEFORE_MS + DECIDE_AFTER_MS) speeds.removeFirst()
         if (meters > 0) pending.addLast(Piece(timeMs, speed, meters))
         return decide(all = false)
     }
 
     /** Only a speed (no distance counted, e.g. a fix the street matcher did not use). */
-    fun speed(timeMs: Long, speed: Double) = add(timeMs, speed, 0.0)
+    fun speed(timeMs: Long, speed: Double, onRail: Boolean = false) = add(timeMs, speed, 0.0, onRail)
 
     /** End of the tour: decide everything that is still open. */
     fun flush(): Map<TravelMode, Double> = decide(all = true)
 
     /** Mode right now, for the status line. */
     fun current(nowMs: Long = latest): TravelMode {
-        val recent = speeds.filter { nowMs - it.first <= 60_000 }.map { it.second }
+        manual?.let { return it }
+        val recent = speeds.filter { nowMs - it.timeMs <= 60_000 }.map { it.speed }
         val last = recent.lastOrNull() ?: return TravelMode.STILL
         return when {
-            speeds.any { nowMs - it.first <= BEFORE_MS && it.second > CAR_SPEED } && last > 1.0 -> TravelMode.CAR
+            onTrain(speeds.filter { nowMs - it.timeMs <= DECIDE_AFTER_MS }) -> TravelMode.TRAIN
+            speeds.any { nowMs - it.timeMs <= BEFORE_MS && it.speed > CAR_SPEED } && last > SLOW -> TravelMode.CAR
+            last < SLOW && speeds.any { nowMs - it.timeMs <= BEFORE_MS && it.speed > CAR_SPEED } -> TravelMode.STILL   // traffic light or parked
             last < 0.5 -> TravelMode.STILL
             recent.any { it > BIKE_SPEED } -> TravelMode.BIKE
             else -> TravelMode.WALK
@@ -54,10 +63,19 @@ class TripModeClassifier {
         return out
     }
 
+    /** Most of the moving samples right on a railway (away from streets), at train speeds. */
+    private fun onTrain(samples: List<Sample>): Boolean {
+        val moving = samples.filter { it.speed > 3.0 }
+        return moving.size >= 6 && moving.count { it.onRail } >= 0.75 * moving.size && moving.any { it.speed > TRAIN_SPEED }
+    }
+
     private fun modeOf(p: Piece): TravelMode {
-        val after = speeds.filter { it.first in p.timeMs..(p.timeMs + DECIDE_AFTER_MS) }.map { it.second }
-        val around = speeds.filter { it.first in (p.timeMs - BEFORE_MS)..(p.timeMs + DECIDE_AFTER_MS) }.map { it.second }
+        manual?.let { return it }
+        val window = speeds.filter { it.timeMs in (p.timeMs - BEFORE_MS)..(p.timeMs + DECIDE_AFTER_MS) }
+        val after = speeds.filter { it.timeMs in p.timeMs..(p.timeMs + DECIDE_AFTER_MS) }.map { it.speed }
+        val around = window.map { it.speed }
         return when {
+            onTrain(window) -> TravelMode.TRAIN
             p.speed < SLOW && after.size >= 3 && after.all { it < SLOW } -> TravelMode.WALK
             around.any { it > CAR_SPEED } -> TravelMode.CAR
             around.any { it > BIKE_SPEED } && p.speed > 2.0 -> TravelMode.BIKE
@@ -68,6 +86,8 @@ class TripModeClassifier {
     companion object {
         /** ~34 km/h: bikes hardly ever, cars all the time. */
         const val CAR_SPEED = 9.5
+        /** ~25 km/h on the rails. */
+        const val TRAIN_SPEED = 7.0
         /** ~16 km/h: faster than running. */
         const val BIKE_SPEED = 4.5
         const val SLOW = 2.2

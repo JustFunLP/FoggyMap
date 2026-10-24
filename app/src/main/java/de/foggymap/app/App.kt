@@ -68,6 +68,8 @@ object App {
     val remoteRoads = MutableSharedFlow<List<String>>(extraBufferCapacity = 32)
     val tracking = MutableStateFlow(TrackingUi())
     val location = MutableStateFlow<Location?>(null)
+    /** Way of moving chosen by hand (null = automatic). */
+    val manualMode = MutableStateFlow<de.foggymap.app.core.TravelMode?>(null)
     private val displayFilter = de.foggymap.app.core.PositionFilter()
 
     /** Your position for the map: steadied while you stand (see PositionFilter), immediate while you move. */
@@ -95,6 +97,7 @@ object App {
         updater = Updater(app)
         live = de.foggymap.app.data.LiveLink(sync, db, prefs)
         badges = de.foggymap.app.data.BadgeRepository(app, prefs)
+        manualMode.value = runCatching { de.foggymap.app.core.TravelMode.valueOf(prefs.manualMode) }.getOrNull()
         sync.init()
         de.foggymap.app.data.UpdateCheckWorker.schedule(app)
         scope.launch { refreshCoverage() }

@@ -12,7 +12,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.update
 
 /** A group member seen on the live channel in the last minutes. */
-data class LiveFriend(val key: String, val name: String, val pos: LatLon, val heading: Double?, val speed: Double?, val atMs: Long)
+data class LiveFriend(val key: String, val name: String, val pos: LatLon, val heading: Double?, val speed: Double?, val atMs: Long,
+                      val mode: de.foggymap.app.core.TravelMode? = null)
 
 /**
  * Decides when the live channel ([NostrLive]) is open:
@@ -82,7 +83,8 @@ class LiveLink(private val sync: SyncManager, private val db: RevealDatabase, pr
             take
         }
         lastSentAt = now; lastSentPos = pos
-        val n = runCatching { l.send(prefs.nickname, pos.lat, pos.lon, lastHeading, if (loc.hasSpeed()) loc.speed.toDouble() else null, items) }.getOrDefault(0)
+        val n = runCatching { l.send(prefs.nickname, pos.lat, pos.lon, lastHeading, if (loc.hasSpeed()) loc.speed.toDouble() else null, items,
+            (App.manualMode.value ?: App.tracking.value.mode).name) }.getOrDefault(0)
         if (n == 0 && items.isNotEmpty()) synchronized(pending) { pending.addAll(0, items) }   // not connected yet: try again
     }
 
@@ -92,7 +94,8 @@ class LiveLink(private val sync: SyncManager, private val db: RevealDatabase, pr
             val prev = old[key]
             val heading = live.heading ?: prev?.heading
             (old.filterValues { System.currentTimeMillis() - it.atMs < STALE_MS } +
-                (key to LiveFriend(key, live.name, LatLon(live.lat, live.lon), heading, live.speed, System.currentTimeMillis())))
+                (key to LiveFriend(key, live.name, LatLon(live.lat, live.lon), heading, live.speed, System.currentTimeMillis(),
+                    live.mode?.let { m -> runCatching { de.foggymap.app.core.TravelMode.valueOf(m) }.getOrNull() })))
         }
         if (live.items.isNotEmpty()) {
             val added = runCatching { db.insert(live.items, "n:" + key.take(16), synced = true) }.getOrElse { emptyList() }

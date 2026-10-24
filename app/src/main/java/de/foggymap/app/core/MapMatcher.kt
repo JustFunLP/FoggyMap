@@ -15,7 +15,7 @@ data class Fix(
     val pos get() = LatLon(lat, lon)
 }
 
-enum class TravelMode { STILL, WALK, BIKE, CAR }
+enum class TravelMode { STILL, WALK, BIKE, CAR, TRAIN }
 
 /**
  * Turns noisy GPS into confirmed street segments.

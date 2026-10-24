@@ -56,6 +56,11 @@ class Prefs(context: Context) {
         get() = p.getLong("exit_ack", 0L)
         set(v) = p.edit().putLong("exit_ack", v).apply()
 
+    /** Way of moving chosen by hand for the running tour ("" = recognise automatically). */
+    var manualMode: String
+        get() = p.getString("manual_mode", "") ?: ""
+        set(v) = p.edit().putString("manual_mode", v).apply()
+
     /** Map with north up instead of your viewing direction (compass button). */
     var northUp: Boolean
         get() = p.getBoolean("north_up", false)

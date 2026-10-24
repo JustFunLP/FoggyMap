@@ -21,7 +21,8 @@ Alles hier geht im Browser bzw. der GitHub-App auf dem Android-Handy. Ein PC ist
    - Benachrichtigungen: **Zulassen** (zeigt, dass aufgezeichnet wird).
 3. Losgehen, -radeln oder -fahren. Sobald du eine Straße betrittst, verschwindet der Nebel über dem ganzen Abschnitt bis zur nächsten Kreuzung und über den angrenzenden Häuserblöcken.
 4. Das Handy darf in die Tasche, der Bildschirm darf aus sein, andere Apps dürfen offen sein. Beenden über **„Erkundung beenden“** unten auf der Karte oder in der Benachrichtigung. Wischst du FoggyMap aus der App-Übersicht weg, endet die Erkundung ebenfalls und das GPS geht aus.
-5. **Drei Knöpfe rechts unten auf der Karte:**
+5. **Knöpfe rechts unten auf der Karte:**
+   - **Fortbewegung** (oberster Knopf): zeigt, wie du gerade unterwegs bist, als Läufer, Rad, Auto oder Zug. Ein kleines „A“ heißt: automatisch erkannt. Tippen, um es selbst festzulegen (gilt bis zum Ende der Erkundung). Beim **Zug** wird unterwegs nichts aufgedeckt. Beim **Auto** zählen nur Straßen, auf denen Autos fahren. Erkannt wird der Zug, wenn du schnell genau auf einer Bahnstrecke unterwegs bist, abseits von Straßen.
    - **Kompass:** Die Nadel zeigt immer nach Norden. Ein Tipp dreht die Karte nach Norden und hält sie so, auch wenn sie auf dich fixiert ist (der Knopf leuchtet dann). Noch ein Tipp: wieder deine Blickrichtung oben.
    - **2D / 3D:** wechselt zwischen flacher Karte und geneigter 3D-Ansicht.
    - **Standort:** fixiert die Karte auf dich, deine Blickrichtung oben (beim Rad- und Autofahren die Fahrtrichtung). Verschiebst du die Karte mit dem Finger, löst sich das. Zoomen geht, ohne dass es sich löst.
@@ -50,7 +51,7 @@ Es muss **nichts eingerichtet** werden: kein Server, kein Konto, kein GitHub. Al
 3. **Freund/Kollege:** installiert die App über den Link in der Nachricht (wie in Abschnitt 1, ohne GitHub-Konto) → App öffnen → **Menü → Koop** → die Einladungsnachricht in das Feld *„Einladung einfügen“* kopieren (oder in WhatsApp lange auf die Nachricht tippen → **Teilen → FoggyMap**) → **Beitreten**.
 4. Ab jetzt sehen alle, was jeder aufdeckt. Synchronisiert wird automatisch alle 2–3 Minuten während der Erkundung, beim Öffnen der App und sobald wieder Internet da ist. Von Hand: **Menü → Koop** → das Sync-Symbol rechts neben dem Status.
 
-**Auf der Karte** bist du eine kleine violette Figur, deine Freunde sind türkis, mit Namen darunter. Wer unterwegs ist, läuft auf der Stelle. Der Lichtkegel am Boden zeigt die Blickrichtung. Mit eingeschaltetem Live-Standort bewegen sich die Figuren alle 2–3 Sekunden, und ihr seht den Nebel beim anderen fast sofort verschwinden.
+**Auf der Karte** bist du eine kleine violette Figur, deine Freunde sind türkis, mit Namen darunter. Je nach Fortbewegung ist es ein Läufer, ein Radfahrer, ein Auto oder ein Zug. Wer unterwegs ist, läuft auf der Stelle. Der Lichtkegel am Boden zeigt die Blickrichtung. Mit eingeschaltetem Live-Standort bewegen sich die Figuren alle 2–3 Sekunden, und ihr seht den Nebel beim anderen fast sofort verschwinden.
 
 **Wie funktioniert das ohne Server?** Die Funde laufen über mehrere öffentliche **Nostr-Relays** (frei nutzbare Nachrichten-Server, die jeder verwenden darf). Alles ist mit eurem Gruppencode **verschlüsselt** (AES-256). Die Relays sehen nur unlesbare Pakete, keine Namen, keine Orte. Die App schreibt gleichzeitig an fünf Relays, damit nichts verloren geht, wenn eines ausfällt. Deine eigenen Funde bleiben ohnehin immer auf deinem Handy.
 

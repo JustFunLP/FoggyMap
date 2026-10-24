@@ -73,6 +73,18 @@ class Explorer(knownRoadIds: Collection<String>) {
     private val gapFill = GapFill()
     /** Tests can switch the gap filling off to look at the matcher alone. */
     var gapFillEnabled = true
+    /** Driving (chosen by hand): only streets a car can use are matched. */
+    var vehicleOnly = false
+
+    /** How close the nearest railway and the nearest drivable street are (metres, null = none within 60 m). */
+    fun railContext(p: LatLon): Pair<Double?, Double?> {
+        var rail: Double? = null; var road: Double? = null
+        for (m in models.values) {
+            m.railDistance(p, 60.0)?.let { d -> rail = minOf(rail ?: d, d) }
+            m.roadDistance(p, 60.0)?.let { d -> road = minOf(road ?: d, d) }
+        }
+        return rail to road
+    }
     private var graph: GapFill.Graph? = null
     private var lastGood: Fix? = null
 
@@ -98,8 +110,10 @@ class Explorer(knownRoadIds: Collection<String>) {
         matcher.markKnown(segIds)
     }
 
-    fun onFix(fix: Fix): Step {
+    /** [reveal] = false while riding a train: nothing beside the tracks is uncovered. */
+    fun onFix(fix: Fix, reveal: Boolean = true): Step {
         lastPos = fix.pos
+        if (!reveal) { lastGood = null; return Step(MapMatcher.Result(false, "train"), emptyList(), emptyList()) }
         val result = matcher.process(fix) { pos, radius -> candidates(pos, radius) }
         // Sparse fixes (battery saver, batching, fast driving): fill the way between them along the streets.
         val filled = ArrayList<Segment>()
@@ -131,6 +145,7 @@ class Explorer(knownRoadIds: Collection<String>) {
     private fun candidates(p: LatLon, radius: Double): List<Candidate> {
         val byId = HashMap<String, Candidate>()
         for (m in models.values) for (c in m.candidates(p, radius)) {
+            if (vehicleOnly && !c.segment.roadClass.vehicular) continue
             val old = byId[c.segment.id]
             if (old == null || c.distance < old.distance) byId[c.segment.id] = c
         }

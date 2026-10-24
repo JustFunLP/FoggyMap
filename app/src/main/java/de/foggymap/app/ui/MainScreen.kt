@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -191,6 +192,12 @@ fun MainScreen(activity: MainActivity) {
         while (true) { kotlinx.coroutines.delay(10_000); controller?.let { android.util.Log.i("FoggyMap", "ui: " + it.debugState()) } }
     }
     LaunchedEffect(controller, location, locationEnabled) { location?.let { controller?.updateLocation(it) } }
+    val manualMode by App.manualMode.collectAsState()
+    // While standing (traffic light, station) the figure keeps the last way of moving.
+    var lastMoving by remember { mutableStateOf(de.foggymap.app.core.TravelMode.WALK) }
+    var showModePicker by remember { mutableStateOf(false) }
+    LaunchedEffect(tracking.mode) { if (tracking.mode != de.foggymap.app.core.TravelMode.STILL) lastMoving = tracking.mode }
+    LaunchedEffect(controller, manualMode, lastMoving) { controller?.setMyMode(manualMode ?: lastMoving) }
     // While exploring, the map follows you until you move it away by hand.
     LaunchedEffect(controller, tracking.active, location != null) {
         val c = controller ?: return@LaunchedEffect
@@ -281,8 +288,13 @@ fun MainScreen(activity: MainActivity) {
                     controller?.startFollowing(App.prefs.perspective)
                 }
             },
-            onStartStop = { onStartClicked() })
+            onStartStop = { onStartClicked() },
+            mode = manualMode ?: lastMoving, modeByHand = manualMode != null, onMode = { showModePicker = true })
     }
+    if (showModePicker) ModePicker(manualMode, onPick = { m ->
+        App.manualMode.value = m; App.prefs.manualMode = m?.name ?: ""
+        showModePicker = false
+    }) { showModePicker = false }
 
     when (sheet) {
         Sheet.MENU -> MenuSheet(syncUi, activity.pendingInvite, onInviteUsed = { activity.pendingInvite = null }, initialTab = menuTab,
@@ -323,7 +335,8 @@ fun MainScreen(activity: MainActivity) {
 @Composable
 internal fun MapControls(tracking: de.foggymap.app.TrackingUi, groupSize: Int, mapBearing: Float, northUp: Boolean, tilted: Boolean,
                          following: Boolean, onMenu: () -> Unit, onCompass: () -> Unit, onPerspective: () -> Unit,
-                         onLocate: () -> Unit, onStartStop: () -> Unit) {
+                         onLocate: () -> Unit, onStartStop: () -> Unit,
+                         mode: TravelMode = TravelMode.WALK, modeByHand: Boolean = false, onMode: () -> Unit = {}) {
     Box(Modifier.fillMaxSize()) {
         // Top scrim + bar
         Box(Modifier.fillMaxWidth().height(130.dp).background(Brush.verticalGradient(listOf(Fog.Bg.copy(alpha = 0.92f), Color.Transparent))))
@@ -351,6 +364,7 @@ internal fun MapControls(tracking: de.foggymap.app.TrackingUi, groupSize: Int, m
             }
             Spacer(Modifier.width(12.dp))
             Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ModeButton(mode, modeByHand, onMode)
                 CompassButton(mapBearing, northUp, onCompass)
                 PerspectiveButton(tilted, onPerspective)
                 LocateButton(following, onLocate)
@@ -419,6 +433,57 @@ internal fun CompassButton(mapBearing: Float, northUp: Boolean, onClick: () -> U
     }
 }
 
+/** How you move (walking, bike, car, train): shows the current one, "A" = recognised automatically. Tap = choose. */
+@Composable
+internal fun ModeButton(mode: TravelMode, byHand: Boolean, onClick: () -> Unit) {
+    MapButton(byHand, "Fortbewegung: ${modeLabel(mode)}${if (byHand) " (gewählt)" else " (automatisch)"}", onClick = onClick) {
+        Box {
+            Icon(painterResource(modeIcon(mode)), null, tint = if (byHand) Color.White else Fog.Lavender, modifier = Modifier.size(22.dp))
+            if (!byHand) Text("A", color = Fog.Bg, fontSize = 8.sp, fontWeight = FontWeight.Black,
+                modifier = Modifier.align(Alignment.BottomEnd).offset(x = 5.dp, y = 4.dp).clip(CircleShape).background(Fog.Lavender).padding(horizontal = 3.dp))
+        }
+    }
+}
+
+/** Choose how you move – or let FoggyMap recognise it. Valid until exploring ends. */
+@Composable
+internal fun ModePicker(current: TravelMode?, onPick: (TravelMode?) -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss, containerColor = Fog.Surface, titleContentColor = Fog.Text, textContentColor = Fog.Text,
+        title = { Text("Wie bist du unterwegs?") },
+        text = { ModeOptions(current, onPick) },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fertig", color = Fog.Violet2) } },
+    )
+}
+
+@Composable
+internal fun ModeOptions(current: TravelMode?, onPick: (TravelMode?) -> Unit) {
+    val options = listOf<Triple<TravelMode?, String, String>>(
+        Triple(null, "Automatisch", "Erkennt Gehen, Rad, Auto und Zug selbst"),
+        Triple(TravelMode.WALK, "Zu Fuß", "Gehen und Laufen"),
+        Triple(TravelMode.BIKE, "Fahrrad", ""),
+        Triple(TravelMode.CAR, "Auto", "Nur Straßen, auf denen Autos fahren"),
+        Triple(TravelMode.TRAIN, "Zug", "Unterwegs wird nichts aufgedeckt"),
+    )
+            Column {
+                for ((m, title, sub) in options) {
+                    val sel = m == current
+                    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if (sel) Fog.SurfaceHigh else Color.Transparent)
+                        .border(1.dp, if (sel) Fog.Violet else Color.Transparent, RoundedCornerShape(14.dp))
+                        .clickable { onPick(m) }.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(painterResource(if (m == null) R.drawable.ic_auto_mode else modeIcon(m)), null, tint = Fog.Lavender, modifier = Modifier.size(22.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Fog.Text)
+                            if (sub.isNotEmpty()) Text(sub, fontSize = 12.sp, color = Fog.Muted)
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                }
+                Text("Gilt bis zum Ende der Erkundung.", fontSize = 11.sp, color = Fog.Muted, modifier = Modifier.padding(top = 4.dp))
+            }
+}
+
 /** Switches between the tilted 3D view and the flat 2D map. Shows what a tap switches to. */
 @Composable
 internal fun PerspectiveButton(tilted: Boolean, onClick: () -> Unit) {
@@ -483,6 +548,14 @@ fun modeLabel(m: TravelMode) = when (m) {
     TravelMode.WALK -> "zu Fuß"
     TravelMode.BIKE -> "Rad"
     TravelMode.CAR -> "Auto"
+    TravelMode.TRAIN -> "Zug"
+}
+
+fun modeIcon(m: TravelMode?) = when (m) {
+    TravelMode.CAR -> R.drawable.ic_car
+    TravelMode.BIKE -> R.drawable.ic_bike
+    TravelMode.TRAIN -> R.drawable.ic_train
+    else -> R.drawable.ic_walk
 }
 
 fun hasPermission(c: Context, p: String) = c.checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED

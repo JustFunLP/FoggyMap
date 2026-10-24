@@ -42,4 +42,22 @@ class TripModeClassifierTest {
         assertTrue("walked ${walk.toInt()} of 420 m", walk > 0.8 * 420)
         assertEquals(300 * 13.0, m[TravelMode.CAR] ?: 0.0, 300 * 13.0 * 0.03)
     }
+
+    @Test fun ridingAlongTheRailsIsATrainAndHandChoiceWins() {
+        val c = TripModeClassifier()
+        var t = 0L
+        val total = HashMap<TravelMode, Double>()
+        fun merge(m: Map<TravelMode, Double>) = m.forEach { (k, v) -> total[k] = (total[k] ?: 0.0) + v }
+        // 8 minutes at 60–90 km/h right on the tracks
+        for (s in 0 until 480 step 3) { val v = 17.0 + (s % 30) * 0.25; merge(c.add(t, v, v * 3, onRail = true)); t += 3_000 }
+        assertEquals(TravelMode.TRAIN, c.current())
+        // a car at the same speed on a street is not a train
+        val car = trip(480 to { s -> 17.0 + (s % 30) * 0.25 })
+        assertTrue(share(car, TravelMode.CAR) > 0.99)
+        merge(c.flush())
+        assertTrue(share(total, TravelMode.TRAIN) > 0.99)
+        c.manual = TravelMode.BIKE
+        assertEquals(TravelMode.BIKE, c.current())
+        assertEquals(mapOf(TravelMode.BIKE to 30.0), c.add(t + 200_000, 3.0, 30.0).let { c.flush() })
+    }
 }

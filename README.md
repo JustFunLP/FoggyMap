@@ -58,6 +58,12 @@ scripts/       Emulator-End-to-End-Test (simulierte GPS-Route)
 - **Optional: eigener Server** (Cloudflare Worker + D1 oder Node.js + SQLite, siehe ANLEITUNG Abschnitt 4). Dann gilt: 12-stellige Gruppencodes, Ratenbegrenzung, Eingabeprüfung, Größenlimits und nur HTTPS. Mitglieds-IDs werden gehasht.
 - Geteilt werden nur aufgedeckte Flächen, Kilometerstände und der Anzeigename. Der **Live-Standort ist standardmäßig aus**. Er wird nur nach ausdrücklicher Bestätigung übertragen und verfällt nach 10 Minuten.
 
+## Fortbewegung
+
+- `TripModeClassifier` (Unit-Tests) entscheidet aus den umliegenden Minuten, nicht aus einem Moment: Zug, wenn die bewegten Positionen überwiegend genau auf einer Bahnstrecke liegen (< 20 m, Straße mind. 15 m weiter weg) und Zuggeschwindigkeit vorkommt. Auto, wenn innerhalb von 3 min davor oder 90 s danach über ~34 km/h gefahren wird. Rad bei Geschwindigkeiten über ~16 km/h, sonst zu Fuß (auch Joggen). Jede Strecke wird 90 s zurückgehalten, damit der Ampelstart sie noch richtig zuordnet.
+- Von Hand wählbar (Knopf auf der Karte, gilt bis zum Ende der Tour): Zug deckt nichts auf, Auto passt nur auf befahrbare Straßen.
+- Die Figur auf der Karte folgt der Fortbewegung (Läufer, Radfahrer, Auto, Zug, jeweils von der Seite, von vorn und von hinten, animiert). Freunde schicken ihre Fortbewegung im Live-Kanal mit.
+
 ## Fehlersuche
 
 - **Problembericht** (Menü → App): Gerät, Android, Einstellungen, GPS-Qualität der Tour (Median, 90 %, Anteil zu ungenau, Zeit je GPS-Stufe), Akku %/h (ganzes Handy, nur ohne Ladekabel, gesamt und mit Live-Standort), Kartencache, Koop-Status, Abstürze und das eigene Protokoll der App (`logcat --pid`). Bereinigt durch `ReportSanitizer` (Unit-Test): keine Koordinaten, Kachelnummern, Straßen- oder Personennamen, Gruppencodes, Schlüssel. Geteilt als Textdatei über einen FileProvider, nur nach Vorschau.

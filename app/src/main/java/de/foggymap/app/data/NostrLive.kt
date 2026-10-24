@@ -34,7 +34,7 @@ class NostrLive(
         .readTimeout(0, TimeUnit.SECONDS).pingInterval(25, TimeUnit.SECONDS).build(),
 ) {
     data class Live(val pubkey: String, val name: String, val lat: Double, val lon: Double, val heading: Double?,
-                    val speed: Double?, val atMs: Long, val items: List<RevealItem>)
+                    val speed: Double?, val atMs: Long, val items: List<RevealItem>, val mode: String? = null)
 
     val myPubkey: String = Schnorr.publicKey(secret).hex()
     /** Called (on a background thread) for every live message of another member. */
@@ -75,8 +75,9 @@ class NostrLive(
     }
 
     /** Sends one live message to every connected relay; returns how many took it. */
-    fun send(name: String, lat: Double, lon: Double, heading: Double?, speed: Double?, items: List<RevealItem>): Int {
+    fun send(name: String, lat: Double, lon: Double, heading: Double?, speed: Double?, items: List<RevealItem>, mode: String? = null): Int {
         val o = JSONObject().put("n", name).put("a", Math.round(lat * 1e6) / 1e6).put("o", Math.round(lon * 1e6) / 1e6)
+        mode?.let { o.put("m", it) }
         heading?.let { o.put("h", Math.round(it).toInt()) }
         speed?.let { o.put("s", Math.round(it * 10) / 10.0) }
         if (items.isNotEmpty()) o.put("i", JSONArray(NostrPacking.encodeItems(items)))
@@ -128,7 +129,8 @@ class NostrLive(
         val o = key.open(e.content)?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return
         val items = o.optJSONArray("i")?.let { NostrPacking.decodeItems(it.toString()) } ?: emptyList()
         onLive?.invoke(Live(e.pubkey, o.optString("n", "?"), o.optDouble("a"), o.optDouble("o"),
-            if (o.has("h")) o.optDouble("h") else null, if (o.has("s")) o.optDouble("s") else null, e.createdAt * 1000, items))
+            if (o.has("h")) o.optDouble("h") else null, if (o.has("s")) o.optDouble("s") else null, e.createdAt * 1000, items,
+            o.optString("m").ifEmpty { null }))
     }
 
     companion object {
