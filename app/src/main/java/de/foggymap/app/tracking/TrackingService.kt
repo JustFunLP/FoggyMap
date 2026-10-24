@@ -207,8 +207,9 @@ class TrackingService : Service() {
             // On a train nothing is uncovered (you are not on the street).
             if (App.prefs.revealMode == de.foggymap.app.core.RevealMode.RADIUS && tripMode.current() != TravelMode.TRAIN) revealRadius(fix)
             fix.bearing?.let { lastHeading = it }
-            updateProfile(fix, loc)
+            updateProfile(fix, loc, defer = true)
         }
+        pendingProfile?.let { p -> pendingProfile = null; if (p != locations.current) setProfile(p) }
         drain(ex)
         App.tracking.update {
             it.copy(accuracy = lastLocation?.accuracy, queuedFixes = queue.size,
@@ -413,16 +414,24 @@ class TrackingService : Service() {
      * moving → full rate; standing → GPS off after ~20 s when the phone's activity recognition agrees,
      * otherwise throttled after ~30 s and off after ~2.5 min (~40 s at a place where you often stand).
      */
-    private fun updateProfile(fix: Fix, @Suppress("UNUSED_PARAMETER") loc: Location) {
+    /** Profile decided while going through a batch of positions; applied once at the end (no re-subscribing per fix). */
+    private var pendingProfile: LocationController.Profile? = null
+
+    private fun updateProfile(fix: Fix, @Suppress("UNUSED_PARAMETER") loc: Location, defer: Boolean = false) {
         val now = SystemClock.elapsedRealtime()
         val speed = fix.speed ?: 0.0
-        val current = locations.current
+        val before = pendingProfile ?: locations.current
         val anchor = stillAnchor
         val moved = anchor?.let { Geo.distance(it, fix.pos) } ?: Double.MAX_VALUE
         if (moved > maxOf(30.0, fix.accuracy) || speed > 1.5 || (speed > 0.9 && moved > 10.0 && fix.accuracy <= 20.0)) {
             stillAnchor = fix.pos; stillSince = now
-            if (current == LocationController.Profile.STILL || current == LocationController.Profile.SLOW) wake("Bewegung")
+            if (before == LocationController.Profile.STILL || before == LocationController.Profile.SLOW) {
+                pendingProfile = null
+                if (locations.current == LocationController.Profile.STILL || locations.current == LocationController.Profile.SLOW) wake("Bewegung")
+            }
         }
+        // After a wake-up this is MOVING again.
+        val current = pendingProfile ?: locations.current
         val stillFor = now - stillSince
         val knownPlace = fix.accuracy <= 50.0 && restSpots.isKnown(stillAnchor ?: fix.pos)
         // The motion sensor says "standing" and the GPS agrees – no movement for 20 s since that report
@@ -444,7 +453,8 @@ class TrackingService : Service() {
                 App.prefs.restSpots = restSpots.encode()
             }
         }
-        if (target != current) setProfile(target)
+        if (defer) pendingProfile = target
+        else if (target != locations.current) setProfile(target)
     }
 
     private fun setProfile(p: LocationController.Profile) {
