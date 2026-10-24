@@ -85,6 +85,9 @@ class TrackingService : Service() {
 
     // Statistics, flushed periodically
     private val distanceBuffer = HashMap<TravelMode, Double>()
+    /** On foot / bike / car from the speeds of the surrounding minutes (not from one moment). */
+    private var tripMode = de.foggymap.app.core.TripModeClassifier()
+    private fun addDistances(m: Map<TravelMode, Double>) = m.forEach { (k, v) -> distanceBuffer[k] = (distanceBuffer[k] ?: 0.0) + v }
     private var sessionSegments = 0
     private var sessionMeters = 0.0
     private var lastRevealed: String? = null
@@ -148,6 +151,7 @@ class TrackingService : Service() {
     private fun start() {
         startedAt = SystemClock.elapsedRealtime()
         stats = de.foggymap.app.core.TourStats(System.currentTimeMillis()).also { it.stage("MOVING", System.currentTimeMillis()) }
+        tripMode = de.foggymap.app.core.TripModeClassifier()
         sampleBattery()
         App.prefs.trackingWanted = true
         App.tracking.update { TrackingUi(active = true) }   // the GPS chip already shows "GPS …"
@@ -220,11 +224,11 @@ class TrackingService : Service() {
             queue.removeFirst(); queueDirty = true
             ex.missingCells(head.pos, head.bearing ?: lastHeading).forEach { requestCell(it) }   // prefetch the cell ahead
             val step = ex.onFix(head)
+            val speed = head.speed ?: step.result.speed
             if (step.result.accepted && step.result.countedDistance > 0) {
                 sessionMeters += step.result.countedDistance
-                val m = step.result.mode.let { if (it == TravelMode.STILL) TravelMode.WALK else it }
-                distanceBuffer[m] = (distanceBuffer[m] ?: 0.0) + step.result.countedDistance
-            }
+                addDistances(tripMode.add(head.timeMs, speed, step.result.countedDistance))
+            } else addDistances(tripMode.speed(head.timeMs, speed))
             if (step.items.isNotEmpty()) {
                 val added = withContext(Dispatchers.IO) { App.db.insert(step.items, RevealDatabase.OWNER_ME, synced = false) }
                 App.live.queueItems(added)
@@ -238,7 +242,7 @@ class TrackingService : Service() {
                 }
             }
             App.tracking.update {
-                it.copy(mode = step.result.mode, street = step.result.current?.name ?: it.street,
+                it.copy(mode = tripMode.current(), street = step.result.current?.name ?: it.street,
                     sessionSegments = sessionSegments, sessionMeters = sessionMeters, lastRevealed = lastRevealed, loadingMap = false,
                     message = if (step.result.accepted) null else it.message)
             }
@@ -549,11 +553,22 @@ class TrackingService : Service() {
         App.tracking.update { it.copy(active = false, message = null, loadingMap = false) }
         if (App.prefs.shareLiveLocation) App.scope.launch { App.sync.clearLive() }
         App.scope.launch {
-            withContext(serial) { flushStats(); persistQueue() }
+            withContext(serial) { addDistances(tripMode.flush()); flushStats(); persistQueue() }
             App.sync.requestSync(0)
         }
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
+    }
+
+    /**
+     * FoggyMap was swiped away from the recent apps: that means "quit" – exploring ends and GPS is
+     * switched off. (Screen off or another app in front keeps exploring.)
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        android.util.Log.i("FoggyMap", "app closed by the user: exploring ends, GPS off")
+        App.prefs.trackingWanted = false
+        if (startedAt != 0L) shutdown() else stopSelf()
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {
@@ -571,6 +586,7 @@ class TrackingService : Service() {
                 }
             } else queueFile.delete()
         }
+        addDistances(tripMode.flush())
         if (distanceBuffer.isNotEmpty()) App.prefs.addDistances(distanceBuffer.toMap())
         scope.cancel()
         super.onDestroy()

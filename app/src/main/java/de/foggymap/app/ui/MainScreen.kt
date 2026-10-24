@@ -438,10 +438,6 @@ internal fun StartStopButton(active: Boolean, modifier: Modifier = Modifier, onC
         Row(modifier.widthIn(max = 240.dp).fillMaxWidth().height(54.dp).clip(shape).background(Fog.Surface.copy(alpha = 0.95f))
             .border(1.dp, Fog.Danger.copy(alpha = 0.45f), shape).clickable(onClick = onClick).padding(horizontal = 18.dp),
             horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-            val pulse by rememberInfiniteTransition(label = "rec").animateFloat(0.35f, 1f,
-                infiniteRepeatable(tween<Float>(1100), RepeatMode.Reverse), label = "dot")
-            Box(Modifier.size(10.dp).clip(CircleShape).background(Fog.Success.copy(alpha = pulse)))
-            Spacer(Modifier.width(10.dp))
             Icon(painterResource(R.drawable.ic_stop), null, tint = Fog.Danger, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(8.dp))
             Text("Erkundung beenden", color = Fog.Text, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, letterSpacing = 0.5.sp)

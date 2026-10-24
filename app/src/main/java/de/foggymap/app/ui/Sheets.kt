@@ -189,9 +189,16 @@ internal fun InfoTab(sync: SyncUi) {
     ModeRow(painterResource(R.drawable.ic_car), "Auto", car, total)
     if (sync.inGroup && sync.members.isNotEmpty()) {
         SectionTitle("Gruppe „${sync.groupName}“")
-        sync.members.sortedByDescending { it.km }.forEachIndexed { i, m -> MemberRow(i, m.name, m.km, m.roads, m.isMe, m.live != null) }
+        withLocalMe(sync.members, c).sortedByDescending { it.km }.forEachIndexed { i, m -> MemberRow(i, m.name, m.km, m.roads, m.isMe, m.live != null) }
     }
 }
+
+/**
+ * Your own row always shows the numbers on this phone (the member card on the relays is only
+ * re-sent with the next sync, so it can be a few minutes behind).
+ */
+internal fun withLocalMe(members: List<de.foggymap.app.data.GroupMember>, c: RevealDatabase.Counts?): List<de.foggymap.app.data.GroupMember> =
+    if (c == null) members else members.map { if (it.isMe) it.copy(name = App.prefs.nickname.ifEmpty { it.name }, roads = c.ownRoads, km = c.ownRoadKm) else it }
 
 @Composable
 private fun InfoLine(icon: Painter, label: String, value: String, tint: Color) {
@@ -240,6 +247,8 @@ private fun formatDuration(seconds: Long): String {
 
 @Composable
 internal fun CoopTab(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> Unit) {
+    val dbVersion by App.dbVersion.collectAsState()
+    val counts by produceState<RevealDatabase.Counts?>(null, dbVersion) { value = withContext(Dispatchers.IO) { App.db.counts() } }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
@@ -323,11 +332,14 @@ internal fun CoopTab(sync: SyncUi, pendingInvite: String?, onInviteUsed: () -> U
             SyncStatusRow(sync) { scope.launch { App.sync.syncNow() } }
             SectionTitle("Mitglieder")
             if (sync.members.isEmpty()) Text("Noch keine Daten – Mitglieder erscheinen nach ihrer ersten Synchronisierung.", color = Fog.Muted, fontSize = 12.sp)
-            sync.members.sortedByDescending { it.km }.forEachIndexed { i, m -> MemberRow(i, m.name, m.km, m.roads, m.isMe, m.live != null) }
+            withLocalMe(sync.members, counts).sortedByDescending { it.km }.forEachIndexed { i, m -> MemberRow(i, m.name, m.km, m.roads, m.isMe, m.live != null) }
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth()) {
+                // Streets several members explored count once (what the map shows), not once per member.
                 Text("Gemeinsamer Fortschritt", color = Fog.Muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                Text("${sync.groupKm.de(1)} km · ${sync.groupRoads.de()} Abschnitte", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                val c = counts
+                Text(if (c != null) "${c.roadKm.de(1)} km · ${c.roads.de()} Abschnitte" else "${sync.groupKm.de(1)} km · ${sync.groupRoads.de()} Abschnitte",
+                    fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             }
             SectionTitle("Live-Standort")
             Row(verticalAlignment = Alignment.CenterVertically) {

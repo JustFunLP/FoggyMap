@@ -45,7 +45,7 @@ class BadgeRepository(private val context: Context, private val prefs: Prefs) {
     /** Looks for new awards (at most every few minutes unless [force]). */
     suspend fun refresh(force: Boolean = false) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        if (!force && now - lastRefresh < 5 * 60_000) return@withContext
+        if (!force && now - lastRefresh < 60_000) return@withContext
         lastRefresh = now
         try {
             val events = relays.query(JSONObject().put("authors", JSONArray().put(Badges.ISSUER)).put("kinds", JSONArray().put(NostrPacking.KIND))
@@ -110,7 +110,10 @@ class BadgeRepository(private val context: Context, private val prefs: Prefs) {
             listOf(listOf("d", d), listOf("t", Badges.TAG), listOf("k", kind)), content.toString())
         val acks = relays.publish(listOf(e))
         lastRefresh = 0
-        acks.count { it.ok }
+        val n = acks.count { it.ok }
+        // The admin sees their own new badge right away (if it is for them, too).
+        if (n > 0 && kind == "fm-award") { kotlinx.coroutines.delay(1500); refresh(force = true) }
+        n
     }
 
     private fun encodeDef(b: Badges.Badge) = JSONObject().put("id", b.id).put("title", b.title).put("text", b.text)

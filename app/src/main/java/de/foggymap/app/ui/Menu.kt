@@ -98,6 +98,8 @@ internal fun MenuContent(sync: SyncUi, pendingInvite: String?, onInviteUsed: () 
         Spacer(Modifier.height(14.dp))
         TabBar(tab, sync) { tab = it }
         Spacer(Modifier.height(6.dp))
+        // Opening the menu also looks for new badges (at most once a minute).
+        LaunchedEffect(Unit) { App.badges.refresh() }
         when (tab) {
             MenuTab.INFO -> InfoTab(sync)
             MenuTab.EXPLORE -> ExploreTab(onChanged)

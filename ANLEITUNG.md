@@ -20,7 +20,7 @@ Alles hier geht im Browser bzw. der GitHub-App auf dem Android-Handy. Ein PC ist
    - Standort: **„Während der Nutzung der App“** und **„Genau“** wählen.
    - Benachrichtigungen: **Zulassen** (zeigt, dass aufgezeichnet wird).
 3. Losgehen, -radeln oder -fahren. Sobald du eine Straße betrittst, verschwindet der Nebel über dem ganzen Abschnitt bis zur nächsten Kreuzung und über den angrenzenden Häuserblöcken.
-4. Das Handy darf in die Tasche, der Bildschirm darf aus sein. Beenden über **„Erkundung beenden“** unten auf der Karte oder in der Benachrichtigung.
+4. Das Handy darf in die Tasche, der Bildschirm darf aus sein, andere Apps dürfen offen sein. Beenden über **„Erkundung beenden“** unten auf der Karte oder in der Benachrichtigung. Wischst du FoggyMap aus der App-Übersicht weg, endet die Erkundung ebenfalls und das GPS geht aus.
 5. **Drei Knöpfe rechts unten auf der Karte:**
    - **Kompass:** Die Nadel zeigt immer nach Norden. Ein Tipp dreht die Karte nach Norden und hält sie so, auch wenn sie auf dich fixiert ist (der Knopf leuchtet dann). Noch ein Tipp: wieder deine Blickrichtung oben.
    - **2D / 3D:** wechselt zwischen flacher Karte und geneigter 3D-Ansicht.
